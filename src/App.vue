@@ -53,8 +53,8 @@
         <p class="calories" v-if="foodData">
           {{
             Math.round(getEnergyValue(
-              foodData.foodNutrients || foodData.response?.foodNutrients || foodData.nutrients?.foodNutrients,
-              foodData.response || foodData
+              foodData.foodNutrients || foodData.response?.foodNutrients || foodData.baseNutrition?.foodNutrients,
+              foodData.response || foodData.baseNutrition
             ) * 100) / 100
           }} calories
         </p>
@@ -62,12 +62,10 @@
           {{
             foodData.totalWeight
               ?? foodData.response?.totalWeight
-              ?? foodData.nutrients?.totalWeight
               ?? foodData.servingSize
               ?? foodData.response?.servingSize
-              ?? foodData.nutrients?.servingSize
               ?? ''
-          }} {{ foodData.servingSizeUnit || foodData.response?.servingSizeUnit || foodData.nutrients?.servingSizeUnit || 'grams' }}
+          }} {{ foodData.servingSizeUnit || foodData.response?.servingSizeUnit || 'grams' }}
         </p>
       </div>
 

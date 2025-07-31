@@ -71,8 +71,6 @@ function parseFoodInput(input) {
     food,
   };
 }
-
-// Function to convert input quantity to base unit for proper calculation
 function convertToBaseUnit(
   inputQuantity,
   inputUnit,
