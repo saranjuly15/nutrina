@@ -1,6 +1,8 @@
 const axios = require("axios");
 
-const getNutritionData = async (foodName) => {
+const getNutritionData = async (foodName, unit) => {
+  console.log("foodName:", foodName);
+  console.log("unit:", unit);
   // USDA API
   const USDA_url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${process.env.USDA_API_KEY}&dataType=Branded,Survey%20FNDDS&query=${foodName}`;
   const USDA_response = await axios.get(USDA_url);
@@ -11,8 +13,31 @@ const getNutritionData = async (foodName) => {
       (nutrient) => nutrient.nutrientName === "Energy"
     ) !== undefined
   ) {
-    const USDA_data = USDA_response.data.foods[0];
-    return { response: USDA_data, edamam: false };
+    if (unit) {
+      const USDA_data = USDA_response.data.foods.find(
+        (food) =>
+          food.householdServingFullText &&
+          food.householdServingFullText
+            .toLowerCase()
+            .includes(unit.toLowerCase())
+      );
+
+      if (USDA_data) {
+        console.log(
+          "USDA data:",
+          USDA_data.description,
+          USDA_data.householdServingFullText
+        );
+        return { response: USDA_data, edamam: false, unit: unit, foods: USDA_response.data.foods };
+      } else {
+        // If no matching food found with unit, fall back to first food
+        const USDA_data = USDA_response.data.foods[0];
+        return { response: USDA_data, edamam: false, unit: null, foods: USDA_response.data.foods };
+      }
+    } else {
+      const USDA_data = USDA_response.data.foods[0];
+      return { response: USDA_data, edamam: false, unit: null, foods: USDA_response.data.foods };
+    }
   } else {
     // Edamam API
     const edamam_url = `https://api.edamam.com/api/nutrition-data?app_id=${process.env.EDAMAM_APP_ID}&app_key=${process.env.EDAMAM_APP_KEY}&nutrition-type=logging&ingr=${foodName}`;

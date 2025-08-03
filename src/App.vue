@@ -125,6 +125,7 @@
               <th>Food Name</th>
               <th>Calories</th>
               <th>Serving Size</th>
+              <th>Household Serving</th>
             </tr>
           </thead>
           <tbody>
@@ -135,6 +136,14 @@
               </td>
               <td>
                 {{ nutrition.servingSize || nutrition.nutrients.servingSize || 1 }} {{ nutrition.servingSizeUnit || nutrition.nutrients.servingSizeUnit || 'g' }}
+              </td>
+              <td>
+                <span v-if="nutrition.householdServingInfo" class="household-serving">
+                  {{ nutrition.householdServingInfo.householdServing }}
+                </span>
+                <span v-else class="no-household-serving">
+                  -
+                </span>
               </td>
             </tr>
           </tbody>
@@ -452,6 +461,22 @@ button:disabled {
 .nutrition-table tr td:last-child,
 .nutrition-table tr th:last-child {
   border-right: none;
+}
+
+.household-serving {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid #bbdefb;
+}
+
+.no-household-serving {
+  color: #999;
+  font-style: italic;
+  font-size: 0.9rem;
 }
 
 .no-nutrition-msg {

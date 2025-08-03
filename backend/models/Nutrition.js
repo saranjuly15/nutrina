@@ -18,6 +18,11 @@ const nutritionSchema = new mongoose.Schema({
         type: String,
         default: 'g',
     },
+    householdServingInfo: {
+        householdServing: String,
+        servingQuantity: Number,
+        matchedFood: String
+    },
     createdAt: {
         type: Date,
         default: Date.now,
