@@ -13,31 +13,10 @@ const getNutritionData = async (foodName, unit) => {
       (nutrient) => nutrient.nutrientName === "Energy"
     ) !== undefined
   ) {
-    if (unit) {
-      const USDA_data = USDA_response.data.foods.find(
-        (food) =>
-          food.householdServingFullText &&
-          food.householdServingFullText
-            .toLowerCase()
-            .includes(unit.toLowerCase())
-      );
-
-      if (USDA_data) {
-        console.log(
-          "USDA data:",
-          USDA_data.description,
-          USDA_data.householdServingFullText
-        );
-        return { response: USDA_data, edamam: false, unit: unit, foods: USDA_response.data.foods };
-      } else {
-        // If no matching food found with unit, fall back to first food
-        const USDA_data = USDA_response.data.foods[0];
-        return { response: USDA_data, edamam: false, unit: null, foods: USDA_response.data.foods };
-      }
-    } else {
-      const USDA_data = USDA_response.data.foods[0];
-      return { response: USDA_data, edamam: false, unit: null, foods: USDA_response.data.foods };
-    }
+    // Return all foods and let the controller handle the matching
+    // This allows convertToBaseUnit to find the best match
+    const USDA_data = USDA_response.data.foods[0]; // Default fallback
+    return { response: USDA_data, edamam: false, unit: unit, foods: USDA_response.data.foods };
   } else {
     // Edamam API
     const edamam_url = `https://api.edamam.com/api/nutrition-data?app_id=${process.env.EDAMAM_APP_ID}&app_key=${process.env.EDAMAM_APP_KEY}&nutrition-type=logging&ingr=${foodName}`;

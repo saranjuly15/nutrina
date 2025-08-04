@@ -42,6 +42,15 @@ const unknownUnits = [
   "bowl",
   "bottle",
   "dozen",
+  "can",
+  "jar",
+  "box",
+  "bag",
+  "tube",
+  "packet",
+  "container",
+  "clove",
+  "carton"
 ];
 
 function parseFoodInput(input) {
@@ -170,7 +179,7 @@ function convertToBaseUnit(
       const bMatch = b.householdServingFullText.match(/(\d+(?:\.\d+)?)/);
       
       if (aMatch && bMatch) {
-        return parseFloat(bMatch[1]) - parseFloat(aMatch[1]); // Higher numbers first
+        return parseFloat(aMatch[1]) - parseFloat(bMatch[1]); // Lower numbers first
       }
       return 0;
     });
@@ -188,32 +197,48 @@ function convertToBaseUnit(
         servingSize: matchedFood.servingSize
       });
       
-      // Extract number from householdServingFullText (e.g., "2 slices" -> 2)
-      const servingMatch = householdServingText.match(/(\d+(?:\.\d+)?)\s*(\w+)/i);
+      // Extract number from householdServingFullText (e.g., "2 slices" -> 2, "0.2 PIZZA | SLICE," -> 1)
+      let servingQuantity = 1; // Default to 1
       
-      if (servingMatch) {
-        const servingQuantity = parseFloat(servingMatch[1]);
-        
-        // Calculate multiplier: if USDA says "2 slices" and user wants "1 slice", 
-        // then multiplier = 1/2 = 0.5 (so we multiply calories by 0.5)
-        const multiplier = (inputQuantity / servingQuantity);
-        
-        console.log("Calculation:", {
-          inputQuantity,
-          servingQuantity,
-          multiplier,
-          convertedQuantity: matchedFood.servingSize * multiplier
-        });
-        
-        return {
-          multiplier,
-          convertedQuantity: matchedFood.servingSize * multiplier,
-          convertedUnit: matchedFood.servingSizeUnit || "g",
-          matchedFood: matchedFood.description,
-          householdServing: householdServingText,
-          servingQuantity: servingQuantity,
-        };
+      // Handle different formats:
+      // 1. "2 slices" -> servingQuantity = 2
+      // 2. "0.2 PIZZA | SLICE," -> servingQuantity = 1 (because 0.2 pizza = 1 slice)
+      // 3. "1 slice" -> servingQuantity = 1
+      
+      if (householdServingText.includes('|')) {
+        // Format like "0.2 PIZZA | SLICE," - this means 0.2 pizza = 1 slice
+        // So if user wants 1 slice, we use 1 as serving quantity
+        servingQuantity = 1;
+      } else {
+        // Format like "2 slices" - extract the number
+        const servingMatch = householdServingText.match(/(\d+(?:\.\d+)?)\s*(\w+)/i);
+        if (servingMatch) {
+          servingQuantity = parseFloat(servingMatch[1]);
+        }
       }
+      
+      // Calculate multiplier: if USDA says "2 slices" and user wants "1 slice", 
+      // then multiplier = 1/2 = 0.5 (so we multiply calories by 0.5)
+      const multiplier = (inputQuantity / servingQuantity);
+        
+      console.log("Calculation:", {
+        inputQuantity,
+        servingQuantity,
+        multiplier,
+        convertedQuantity: matchedFood.servingSize * multiplier,
+        convertedUnit: matchedFood.servingSizeUnit || "g",
+        matchedFood: matchedFood.description,
+        householdServing: householdServingText,
+      });
+        
+      return {
+        multiplier,
+        convertedQuantity: matchedFood.servingSize * multiplier,
+        convertedUnit: matchedFood.servingSizeUnit || "g",
+        matchedFood: matchedFood.description,
+        householdServing: householdServingText,
+        servingQuantity: servingQuantity,
+      };
     }
     
     console.log("No matching foods found, using fallback");
@@ -524,6 +549,20 @@ const getNutrition = async (req, res) => {
       nutritionData.foods || null,
       searchFoodName
     );
+    console.log("Conversion:", conversion);
+
+    // Use the matchedFood data if available, otherwise use the default response
+    let finalNutritionInfo = nutritionInfo;
+    if (conversion.matchedFood && nutritionData.foods) {
+      // Find the matched food in the USDA response
+      const matchedFoodData = nutritionData.foods.find(food => 
+        food.description === conversion.matchedFood
+      );
+      if (matchedFoodData) {
+        finalNutritionInfo = matchedFoodData;
+        console.log("Using matched food data:", matchedFoodData.description);
+      }
+    }
 
     // Store the original serving information without applying multipliers
     // Create a unique name that includes household serving context if applicable
@@ -534,9 +573,9 @@ const getNutrition = async (req, res) => {
     
     const nutrition = new Nutrition({
       name: storageName, // Include household serving context in the name
-      nutrients: nutritionInfo,
-      servingSize: nutritionInfo.servingSize || 1,
-      servingSizeUnit: nutritionInfo.servingSizeUnit || "g",
+      nutrients: finalNutritionInfo,
+      servingSize: finalNutritionInfo.servingSize || 1,
+      servingSizeUnit: finalNutritionInfo.servingSizeUnit || "g",
       // Store additional information for household units
       householdServingInfo: conversion.householdServing ? {
         householdServing: conversion.householdServing,
@@ -547,9 +586,9 @@ const getNutrition = async (req, res) => {
 
     await nutrition.save();
 
-     // Calculate totals for display if quantity > 1
-     if (quantity > 1) {
-       const calculatedNutritionInfo = { ...nutritionInfo };
+     // Calculate totals for display if conversion multiplier is not 1
+     if (conversion.multiplier !== 1) {
+       const calculatedNutritionInfo = { ...finalNutritionInfo };
 
       if (calculatedNutritionInfo.calories)
         calculatedNutritionInfo.calories *= conversion.multiplier;
@@ -568,25 +607,30 @@ const getNutrition = async (req, res) => {
             value: nutrient.value * conversion.multiplier,
           }));
       }
+      if(calculatedNutritionInfo.householdServingFullText){
+        calculatedNutritionInfo.householdServingFullText = conversion.householdServing;
+      }
 
       res.status(200).json({
+        foods: nutritionData.foods,
         response: calculatedNutritionInfo,
         edamam: nutritionData.edamam,
         fromApi: true,
         parsedInput: parsedInput,
         quantity: quantity,
-        baseNutrition: nutritionInfo,
+        baseNutrition: finalNutritionInfo,
         conversion: conversion,
       });
     } else {
-      const baseServingSize = nutritionInfo.servingSize || 1;
-      const baseServingUnit = nutritionInfo.servingSizeUnit || "g";
+      // This block now handles cases where multiplier is 1 (e.g., 1g of food, or 1 slice where 1 slice is the base)
       res.status(200).json({
-        ...nutritionData,
+        foods: nutritionData.foods,
+        response: finalNutritionInfo, // Base nutrition info (same as calculated when multiplier is 1)
+        edamam: nutritionData.edamam,
         fromApi: true,
         parsedInput: parsedInput,
         quantity: quantity,
-        conversion: { multiplier: 1, convertedQuantity: baseServingSize, convertedUnit: baseServingUnit },
+        conversion: conversion, // The actual conversion object (multiplier will be 1)
       });
     }
   } catch (error) {
