@@ -1,274 +1,97 @@
 const { getNutritionData } = require("../services/externalApiServices");
 const Nutrition = require("../models/Nutrition");
-const pluralize = require("pluralize");
+const { normalizeFoodName, parseFoodInput, unknownUnits } = require("../utils/helpers");
+const { generateSearchTerms, performAtlasSearch, filterAtlasSearchResults } = require("../models/atlasSearch");
+const { convertAtlasSearchToBaseUnit, convertApiToBaseUnit } = require("../utils/baseUnitConverter");
 
-function normalizeFoodName(name) {
-  let clean = name
-    .toLowerCase()
-    .replace(/^[0-9]+\s*/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.endsWith("ies") && clean.length > 4) {
-    clean = clean.slice(0, -3) + "y";
-  } else if (
-    (clean.endsWith("ses") ||
-      clean.endsWith("xes") ||
-      clean.endsWith("zes") ||
-      clean.endsWith("ches") ||
-      clean.endsWith("shes")) &&
-    clean.length > 4
-  ) {
-    clean = clean.slice(0, -2);
-  } else if (clean.endsWith("s") && !clean.endsWith("ss") && clean.length > 4) {
-    clean = clean.slice(0, -1);
+// Nutrition Calculation Functions
+function applyMultiplierToNutrients(nutrients, multiplier) {
+  if (multiplier === 1) return nutrients;
+
+  const calculatedNutrients = { ...nutrients };
+
+  if (calculatedNutrients.calories) calculatedNutrients.calories *= multiplier;
+  if (calculatedNutrients.totalWeight) calculatedNutrients.totalWeight *= multiplier;
+  if (calculatedNutrients.servingSize) calculatedNutrients.servingSize *= multiplier;
+
+  if (calculatedNutrients.foodNutrients && Array.isArray(calculatedNutrients.foodNutrients)) {
+    calculatedNutrients.foodNutrients = calculatedNutrients.foodNutrients.map((nutrient) => ({
+      ...nutrient,
+      value: nutrient.value * multiplier,
+    }));
   }
-  return clean;
+
+  return calculatedNutrients;
 }
 
-const knownUnits = [
-  "ml",
-  "g",
-  "kg",
-  "mg",
-  "litre",
-];
-
-const unknownUnits = [
-  "cup",
-  "plate",
-  "glass",
-  "slice",
-  "piece",
-  "bowl",
-  "bottle",
-  "dozen",
-  "can",
-  "jar",
-  "box",
-  "bag",
-  "tube",
-  "packet",
-  "container",
-  "clove",
-  "carton"
-];
-
-function parseFoodInput(input) {
-  input = input.trim().toLowerCase();
-
-  const regex = /^(\d+(?:\.\d+)?)\s*(\w+)?(?:\s+of)?\s+(.*)$/;
-  const match = input.match(regex);
-
-  if (!match) return null;
-
-  const number = parseFloat(match[1]);
-  const possibleUnit = match[2];
-  const rest = match[3].trim();
-
-  let quantity = null;
-  let food = "";
-
-  if (possibleUnit && (knownUnits.includes(pluralize.singular(possibleUnit)) || unknownUnits.includes(pluralize.singular(possibleUnit)))) {
-    quantity = pluralize.singular(possibleUnit);
-    food = pluralize.singular(rest);
-  } else {
-    quantity = null;
-    const combined = (possibleUnit ? possibleUnit + " " : "") + rest;
-    food = pluralize.singular(combined.trim());
-  }
-
-  return {
-    number,
-    quantity,
-    food,
-  };
-}
-function convertToBaseUnit(
-  inputQuantity,
-  inputUnit,
-  baseServingSize,
-  baseServingUnit,
-  usdaFoods = null,
-  searchFoodName = null
-) {
-  // If no input unit, treat as quantity multiplier (e.g., "4 sandwiches")
-  if (!inputUnit) {
-    return {
-      multiplier: inputQuantity,
-      convertedQuantity: inputQuantity * baseServingSize,
-      convertedUnit: baseServingUnit,
-    };
-  }
-
-  // Handle known units (metric units) - keep existing functionality
-  if (knownUnits.includes(inputUnit)) {
-    let multiplier = 1;
-    let convertedQuantity = inputQuantity;
-    let convertedUnit = inputUnit;
-
-    // Handle common unit conversions
-    if (inputUnit === "ml" && baseServingUnit === "ml") {
-      multiplier = inputQuantity / baseServingSize;
-      convertedQuantity = inputQuantity;
-      convertedUnit = "ml";
-    } else if (inputUnit === "g" && baseServingUnit === "g") {
-      multiplier = inputQuantity / baseServingSize;
-      convertedQuantity = inputQuantity;
-      convertedUnit = "g";
-    } else if (inputUnit === "litre" && baseServingUnit === "ml") {
-      // 1 litre = 1000ml
-      const litreInMl = inputQuantity * 1000;
-      multiplier = litreInMl / baseServingSize;
-      convertedQuantity = litreInMl;
-      convertedUnit = "ml";
-    } else {
-      // Default: treat as multiplier
-      multiplier = inputQuantity;
-      convertedQuantity = inputQuantity;
-      convertedUnit = baseServingUnit;
-    }
-
-    return {
-      multiplier,
-      convertedQuantity,
-      convertedUnit,
-    };
-  }
-
-  // Handle unknown units (household units) - search USDA for matching householdServingFullText
-  if (unknownUnits.includes(inputUnit) && usdaFoods && searchFoodName) {
-    const searchFoodLower = searchFoodName.toLowerCase();
-    
-    console.log("Searching for household units:", {
-      inputUnit,
-      searchFoodName: searchFoodLower,
-      availableFoods: usdaFoods.map(f => ({
-        description: f.description,
-        householdServing: f.householdServingFullText
-      }))
-    });
-    
-    // Find foods that match both the household serving text and the food description
-    const matchingFoods = usdaFoods.filter(food => {
-      if (!food.householdServingFullText || !food.description) return false;
-      
-      const servingText = food.householdServingFullText.toLowerCase();
-      const description = food.description.toLowerCase();
-      
-      // Check if the serving text contains the unit (e.g., "slice", "slices")
-      const hasMatchingServing = servingText.includes(inputUnit.toLowerCase()) || 
-                                 servingText.includes(inputUnit.toLowerCase() + 's');
-      
-      // Check if the description contains the food name (more flexible matching)
-      const searchTerms = searchFoodLower.split(' ').filter(term => term.length > 2);
-      const hasMatchingDescription = searchTerms.some(term => description.includes(term));
-      
-      console.log("Checking food:", {
-        description: food.description,
-        householdServing: food.householdServingFullText,
-        hasMatchingServing,
-        hasMatchingDescription
-      });
-      
-      return hasMatchingServing && hasMatchingDescription;
-    });
-
-    // Sort by relevance - prefer foods with multiple units (e.g., "2 slices" over "1 slice")
-    matchingFoods.sort((a, b) => {
-      const aMatch = a.householdServingFullText.match(/(\d+(?:\.\d+)?)/);
-      const bMatch = b.householdServingFullText.match(/(\d+(?:\.\d+)?)/);
-      
-      if (aMatch && bMatch) {
-        return parseFloat(aMatch[1]) - parseFloat(bMatch[1]); // Lower numbers first
-      }
-      return 0;
-    });
-
-    console.log("Matching foods found:", matchingFoods.length);
-    
-    if (matchingFoods.length > 0) {
-      // Use the first matching food's serving information
-      const matchedFood = matchingFoods[0];
-      const householdServingText = matchedFood.householdServingFullText;
-      
-      console.log("Using matched food:", {
-        description: matchedFood.description,
-        householdServing: householdServingText,
-        servingSize: matchedFood.servingSize
-      });
-      
-      // Extract number from householdServingFullText (e.g., "2 slices" -> 2, "0.2 PIZZA | SLICE," -> 1)
-      let servingQuantity = 1; // Default to 1
-      
-      // Handle different formats:
-      // 1. "2 slices" -> servingQuantity = 2
-      // 2. "0.2 PIZZA | SLICE," -> servingQuantity = 1 (because 0.2 pizza = 1 slice)
-      // 3. "1 slice" -> servingQuantity = 1
-      
-      if (householdServingText.includes('|')) {
-        // Format like "0.2 PIZZA | SLICE," - this means 0.2 pizza = 1 slice
-        // So if user wants 1 slice, we use 1 as serving quantity
-        servingQuantity = 1;
-      } else {
-        // Format like "2 slices" - extract the number
-        const servingMatch = householdServingText.match(/(\d+(?:\.\d+)?)\s*(\w+)/i);
-        if (servingMatch) {
-          servingQuantity = parseFloat(servingMatch[1]);
-        }
-      }
-      
-      // Calculate multiplier: if USDA says "2 slices" and user wants "1 slice", 
-      // then multiplier = 1/2 = 0.5 (so we multiply calories by 0.5)
-      const multiplier = (inputQuantity / servingQuantity);
-        
-      console.log("Calculation:", {
-        inputQuantity,
-        servingQuantity,
-        multiplier,
-        convertedQuantity: matchedFood.servingSize * multiplier,
-        convertedUnit: matchedFood.servingSizeUnit || "g",
-        matchedFood: matchedFood.description,
-        householdServing: householdServingText,
-      });
-        
-      return {
-        multiplier,
-        convertedQuantity: matchedFood.servingSize * multiplier,
-        convertedUnit: matchedFood.servingSizeUnit || "g",
-        matchedFood: matchedFood.description,
-        householdServing: householdServingText,
-        servingQuantity: servingQuantity,
-      };
-    }
-    
-    console.log("No matching foods found, using fallback");
-  }
-
-  // Default fallback for unknown units
-  console.log("Using fallback calculation:", {
-    inputQuantity,
-    baseServingSize,
-    multiplier: inputQuantity,
-    convertedQuantity: inputQuantity * baseServingSize
-  });
+function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResult) {
+  const householdInfo = atlasSearchResult.householdServingInfo;
+  const servingQuantity = householdInfo.servingQuantity;
+  const multiplier = (quantity / servingQuantity);
   
   return {
-    multiplier: inputQuantity,
-    convertedQuantity: inputQuantity * baseServingSize,
-    convertedUnit: baseServingUnit,
+    multiplier,
+    convertedQuantity: atlasSearchResult.servingSize * multiplier,
+    convertedUnit: atlasSearchResult.servingSizeUnit || "g",
+    matchedFood: householdInfo.matchedFood,
+    householdServing: householdInfo.householdServing,
+    servingQuantity: servingQuantity,
   };
 }
 
+function createStorageName(cleanSearchTerm, conversion) {
+  let storageName = cleanSearchTerm;
+  if (conversion.householdServing) {
+    storageName = `${cleanSearchTerm}_${conversion.householdServing.replace(/\s+/g, '_')}`;
+  }
+  // For Edamam results with household units, use the original format
+  if (conversion.fromEdamam && conversion.householdServing) {
+    storageName = `${cleanSearchTerm}_${conversion.servingQuantity}_${conversion.householdServing.split(' ')[1]}`;
+  }
+  return storageName;
+}
+
+function createNutritionDocument(storageName, finalNutritionInfo, conversion) {
+  return new Nutrition({
+    name: storageName,
+    nutrients: finalNutritionInfo,
+    servingSize: finalNutritionInfo.servingSize || finalNutritionInfo.totalWeight || 1,
+    servingSizeUnit: finalNutritionInfo.servingSizeUnit || "g",
+    // Store additional information for household units
+    householdServingInfo: conversion.householdServing ? {
+      householdServing: conversion.householdServing,
+      servingQuantity: conversion.servingQuantity,
+      matchedFood: conversion.matchedFood
+    } : null
+  });
+}
+
+function findMatchedFoodData(nutritionData, conversion) {
+  if (!conversion.matchedFood || !nutritionData.foods) return null;
+  
+  return nutritionData.foods.find(food => 
+    food.description === conversion.matchedFood
+  );
+}
+
+// Main Controller Functions
 const getNutrition = async (req, res) => {
   const { foodName } = req.query;
 
   try {
+    console.log("DEBUG: Entering getNutrition function");
+    console.log("DEBUG: foodName =", foodName);
+    console.log("DEBUG: req.query =", req.query);
+    debugger; // This should pause execution
+    console.log("DEBUG: After debugger statement");
+    
     if (!foodName) {
       return res.status(400).json({ message: "Food name is required" });
     }
 
     // Parse the input using the new parser
     const parsedInput = parseFoodInput(foodName);
+  
     console.log("Parsed input:", parsedInput);
 
     // Extract quantity and food name
@@ -280,18 +103,8 @@ const getNutrition = async (req, res) => {
     const cleanSearchTerm = normalizeFoodName(searchFoodName);
     console.log("Searching for:", cleanSearchTerm);
     
-    // Always search for the base food name
-    let searchTerms = [cleanSearchTerm];
-    
-    // Also search for old naming pattern during transition period
-    if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
-      const oldPatternSearchTerm = `${cleanSearchTerm}_${parsedInput.quantity}`;
-      searchTerms.push(oldPatternSearchTerm);
-      
-      // Also try with the full household serving text pattern
-      const oldPatternWithServing = `${cleanSearchTerm}_2_${parsedInput.quantity.toUpperCase()}S`;
-      searchTerms.push(oldPatternWithServing);
-    }
+    // Generate search terms
+    const searchTerms = generateSearchTerms(cleanSearchTerm, parsedInput);
     
     // Debug: Log what we're searching for
     console.log("Search debug:", {
@@ -302,186 +115,51 @@ const getNutrition = async (req, res) => {
       hasHouseholdUnit: parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)
     });
 
-    // // First try exact match
-    // let atlasSearchResults = await Nutrition.aggregate([
-    //   {
-    //     $search: {
-    //       index: "default",
-    //       text: {
-    //         query: cleanSearchTerm,
-    //         path: "name",
-    //       },
-    //     },
-    //   },
-    //   {
-    //     $limit: 5,
-    //   },
-    // ]);
-
-    // console.log(
-    //   "Exact search results:",
-    //   atlasSearchResults.map((r) => r.name)
-    // );
-
-    // If no exact match, try token-based search
-    // if (atlasSearchResults.length === 0) {
-    let atlasSearchResults = [];
+    // Perform Atlas search
+    let atlasSearchResults = await performAtlasSearch(searchTerms);
     
-    // Try searching for each search term
-    for (const searchTerm of searchTerms) {
-      const tokens = searchTerm.trim().split(/\s+/);
-      const mustClauses = tokens.map((token) => ({
-        text: {
-          query: token,
-          path: "name",
-          fuzzy: {
-            maxEdits: 2,
-          },
-        },
-      }));
-
-      const results = await Nutrition.aggregate([
-        {
-          $search: {
-            index: "default",
-            compound: {
-              must: mustClauses,
-            },
-          },
-        },
-        {
-          $limit: 10,
-        },
-      ]);
-      
-      atlasSearchResults.push(...results);
-    }
+    debugger; 
     
-    // Remove duplicates based on _id
-    const uniqueResults = [];
-    const seenIds = new Set();
-    for (const result of atlasSearchResults) {
-      if (!seenIds.has(result._id.toString())) {
-        seenIds.add(result._id.toString());
-        uniqueResults.push(result);
-      }
-    }
-    atlasSearchResults = uniqueResults;
-
-    console.log(
-      "Token search results:",
-      atlasSearchResults.map((r) => r.name)
-    );
-
     console.log(
       "Atlas search results:",
       atlasSearchResults.map((r) => r.name)
     );
 
     // Filter results to ensure relevance and prioritize the correct match
-    if (atlasSearchResults.length > 0) {
-      // First, try to find an exact match for household units
-      if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
-        // Look for items with household serving info that matches the unit
-        const householdMatches = atlasSearchResults.filter(result => 
-          result.householdServingInfo && 
-          result.householdServingInfo.householdServing &&
-          result.householdServingInfo.householdServing.toLowerCase().includes(parsedInput.quantity.toLowerCase())
-        );
-        
-        if (householdMatches.length > 0) {
-          console.log("Found household matches:", householdMatches.map(r => r.name));
-          // Prioritize household matches over base items
-          atlasSearchResults = householdMatches;
-        } else {
-          console.log("No household matches found for household units, will search API");
-          // If searching for household units but no household items found, 
-          // don't use base items - let it fall through to API search
-          atlasSearchResults = [];
-        }
-      } else {
-        // For non-household units, filter for base food name (items without household serving info)
-        const filteredResults = atlasSearchResults.filter((result) => {
-          const resultName = result.name.toLowerCase();
-          const baseSearchTerms = cleanSearchTerm.toLowerCase().split(" ");
-          
-          // Only include items that DON'T have household serving info
-          const hasNoHouseholdInfo = !result.householdServingInfo;
-
-          // Check if the result name contains the main search terms
-          const hasMatchingTerms = baseSearchTerms.some((term) => {
-            return resultName.includes(term) && term.length > 2;
-          });
-
-          return hasMatchingTerms && hasNoHouseholdInfo;
-        });
-
-        if (filteredResults.length > 0) {
-          // Sort by name length to prioritize shorter, more generic names
-          filteredResults.sort((a, b) => a.name.length - b.name.length);
-          atlasSearchResults = filteredResults;
-        }
-      }
-    }
+    atlasSearchResults = filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInput);
 
     console.log("Final selected result:", atlasSearchResults[0]?.name);
 
     // If found using Atlas search, return the first match and DO NOT save a new entry
     if (atlasSearchResults.length > 0) {
+      debugger; // DEBUG: Atlas search found results - inspect atlasSearchResults[0]
       const nutrients = { ...atlasSearchResults[0].nutrients };
 
       // Calculate proper multiplier based on units
-      const baseServingSize =
-        atlasSearchResults[0].servingSize || nutrients.servingSize || 1;
-      const baseServingUnit =
-        atlasSearchResults[0].servingSizeUnit ||
-        nutrients.servingSizeUnit ||
-        "g";
-                     // Use stored household serving info if available
-        let conversion;
-        if (atlasSearchResults[0].householdServingInfo && parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
-          // Use stored household serving information
-          const householdInfo = atlasSearchResults[0].householdServingInfo;
-          const servingQuantity = householdInfo.servingQuantity;
-          const multiplier = (quantity / servingQuantity);
-          
-          conversion = {
-            multiplier,
-            convertedQuantity: baseServingSize * multiplier,
-            convertedUnit: baseServingUnit,
-            matchedFood: householdInfo.matchedFood,
-            householdServing: householdInfo.householdServing,
-            servingQuantity: servingQuantity,
-          };
-        } else {
-          // Use regular conversion for known units or no unit
-          conversion = convertToBaseUnit(
-            quantity,
-            parsedInput?.quantity,
-            baseServingSize,
-            baseServingUnit,
-            null, // No USDA foods for Atlas search results
-            searchFoodName
-          );
-        }
-
-      if (conversion.multiplier !== 1) {
-        if (nutrients.calories) nutrients.calories *= conversion.multiplier;
-        if (nutrients.totalWeight)
-          nutrients.totalWeight *= conversion.multiplier;
-        if (nutrients.servingSize)
-          nutrients.servingSize = conversion.convertedQuantity;
-
-        if (nutrients.foodNutrients && Array.isArray(nutrients.foodNutrients)) {
-          nutrients.foodNutrients = nutrients.foodNutrients.map((nutrient) => ({
-            ...nutrient,
-            value: nutrient.value * conversion.multiplier,
-          }));
-        }
+      const baseServingSize = atlasSearchResults[0].servingSize || nutrients.servingSize || 1;
+      const baseServingUnit = atlasSearchResults[0].servingSizeUnit || nutrients.servingSizeUnit || "g";
+      
+      // Use stored household serving info if available
+      let conversion;
+      if (atlasSearchResults[0].householdServingInfo && parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
+        // Use stored household serving information
+        conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
+      } else {
+        // Use regular conversion for known units or no unit
+        conversion = await convertAtlasSearchToBaseUnit(
+          quantity,
+          parsedInput?.quantity,
+          baseServingSize,
+          baseServingUnit,
+          searchFoodName,
+          foodName
+        );
       }
 
+      const calculatedNutrients = applyMultiplierToNutrients(nutrients, conversion.multiplier);
+
       return res.status(200).json({
-        ...nutrients,
+        ...calculatedNutrients,
         fromDatabase: true,
         searchMethod: "atlas",
         parsedInput: parsedInput,
@@ -491,45 +169,12 @@ const getNutrition = async (req, res) => {
       });
     }
 
-    // COMMENTED OUT REGEX SEARCH CODE (for potential reuse)
-    /*
-    const words = cleanSearchTerm.split(' ');
-
-    // Build AND regex for all words (whole word, any order)
-    const andRegex = words.map(word => ({
-      name: { $regex: new RegExp(`\\b${word}\\b`, 'i') }
-    }));
-
-    // Try AND regex search first
-    let results = await Nutrition.find({ $and: andRegex });
-
-    // If no results, try full phrase as a whole word
-    if (results.length === 0) {
-      results = await Nutrition.find({
-        name: { $regex: new RegExp(`\\b${cleanSearchTerm}\\b`, 'i') }
-      });
-    }
-
-    // If found, return the first match and DO NOT save a new entry
-    if (results.length > 0) {
-      const nutrients = { ...results[0].nutrients };
-      if (quantity > 1) {
-        if (nutrients.calories) nutrients.calories *= quantity;
-        if (nutrients.totalWeight) nutrients.totalWeight *= quantity;
-        // ...multiply other relevant fields if needed
-      }
-      return res.status(200).json({
-        ...nutrients,
-        fromDatabase: true
-      });
-    }
-    */
-
     // If nothing found, fetch from API and save with normalized name
     console.log(
       "No database match found, fetching from API for:",
       searchFoodName
     );
+    debugger; // DEBUG: About to call external API - inspect searchFoodName and unit
     const nutritionData = await getNutritionData(searchFoodName, unit);
     const nutritionInfo = nutritionData.response;
 
@@ -541,72 +186,41 @@ const getNutrition = async (req, res) => {
     // Calculate conversion for response (but don't save multiplied values to DB)
     const baseServingSize = nutritionInfo.servingSize || 1;
     const baseServingUnit = nutritionInfo.servingSizeUnit || "g";
-    const conversion = convertToBaseUnit(
+    const conversion = await convertApiToBaseUnit(
       quantity,
       parsedInput?.quantity,
       baseServingSize,
       baseServingUnit,
       nutritionData.foods || null,
-      searchFoodName
+      searchFoodName,
+      foodName
     );
+    debugger; // DEBUG: After conversion - inspect conversion object
     console.log("Conversion:", conversion);
 
     // Use the matchedFood data if available, otherwise use the default response
     let finalNutritionInfo = nutritionInfo;
-    if (conversion.matchedFood && nutritionData.foods) {
-      // Find the matched food in the USDA response
-      const matchedFoodData = nutritionData.foods.find(food => 
-        food.description === conversion.matchedFood
-      );
-      if (matchedFoodData) {
-        finalNutritionInfo = matchedFoodData;
-        console.log("Using matched food data:", matchedFoodData.description);
-      }
+    const matchedFoodData = findMatchedFoodData(nutritionData, conversion);
+    if (matchedFoodData) {
+      finalNutritionInfo = matchedFoodData;
+      console.log("Using matched food data:", matchedFoodData.description);
+    }
+    
+    // For Edamam results, use the Edamam response directly
+    if (conversion.fromEdamam) {
+      finalNutritionInfo = conversion.response;
+      console.log("Using Edamam data for household unit:", conversion.householdServing);
     }
 
     // Store the original serving information without applying multipliers
-    // Create a unique name that includes household serving context if applicable
-    let storageName = cleanSearchTerm;
-    if (conversion.householdServing) {
-      storageName = `${cleanSearchTerm}_${conversion.householdServing.replace(/\s+/g, '_')}`;
-    }
-    
-    const nutrition = new Nutrition({
-      name: storageName, // Include household serving context in the name
-      nutrients: finalNutritionInfo,
-      servingSize: finalNutritionInfo.servingSize || 1,
-      servingSizeUnit: finalNutritionInfo.servingSizeUnit || "g",
-      // Store additional information for household units
-      householdServingInfo: conversion.householdServing ? {
-        householdServing: conversion.householdServing,
-        servingQuantity: conversion.servingQuantity,
-        matchedFood: conversion.matchedFood
-      } : null
-    });
-
+    const storageName = createStorageName(cleanSearchTerm, conversion);
+    const nutrition = createNutritionDocument(storageName, finalNutritionInfo, conversion);
     await nutrition.save();
 
-     // Calculate totals for display if conversion multiplier is not 1
-     if (conversion.multiplier !== 1) {
-       const calculatedNutritionInfo = { ...finalNutritionInfo };
-
-      if (calculatedNutritionInfo.calories)
-        calculatedNutritionInfo.calories *= conversion.multiplier;
-      if (calculatedNutritionInfo.totalWeight)
-        calculatedNutritionInfo.totalWeight *= conversion.multiplier;
-      if (calculatedNutritionInfo.servingSize)
-        calculatedNutritionInfo.servingSize = conversion.convertedQuantity;
-
-      if (
-        calculatedNutritionInfo.foodNutrients &&
-        Array.isArray(calculatedNutritionInfo.foodNutrients)
-      ) {
-        calculatedNutritionInfo.foodNutrients =
-          calculatedNutritionInfo.foodNutrients.map((nutrient) => ({
-            ...nutrient,
-            value: nutrient.value * conversion.multiplier,
-          }));
-      }
+    // Calculate totals for display if conversion multiplier is not 1
+    if (conversion.multiplier !== 1) {
+      const calculatedNutritionInfo = applyMultiplierToNutrients(finalNutritionInfo, conversion.multiplier);
+      
       if(calculatedNutritionInfo.householdServingFullText){
         calculatedNutritionInfo.householdServingFullText = conversion.householdServing;
       }
@@ -614,7 +228,7 @@ const getNutrition = async (req, res) => {
       res.status(200).json({
         foods: nutritionData.foods,
         response: calculatedNutritionInfo,
-        edamam: nutritionData.edamam,
+        edamam: nutritionData.edamam || conversion.fromEdamam,
         fromApi: true,
         parsedInput: parsedInput,
         quantity: quantity,
@@ -626,7 +240,7 @@ const getNutrition = async (req, res) => {
       res.status(200).json({
         foods: nutritionData.foods,
         response: finalNutritionInfo, // Base nutrition info (same as calculated when multiplier is 1)
-        edamam: nutritionData.edamam,
+        edamam: nutritionData.edamam || conversion.fromEdamam,
         fromApi: true,
         parsedInput: parsedInput,
         quantity: quantity,
@@ -671,7 +285,7 @@ const testAtlasSearch = async (req, res) => {
 
   try {
     if (!query) {
-      return res.status(400).json({ message: "Query parameter is required" });
+      return res.status(400).json({ message: "Test Atlas Search: Query parameter is required" });
     }
 
     // Parse the input using the new parser

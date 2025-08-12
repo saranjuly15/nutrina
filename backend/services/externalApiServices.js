@@ -16,7 +16,12 @@ const getNutritionData = async (foodName, unit) => {
     // Return all foods and let the controller handle the matching
     // This allows convertToBaseUnit to find the best match
     const USDA_data = USDA_response.data.foods[0]; // Default fallback
-    return { response: USDA_data, edamam: false, unit: unit, foods: USDA_response.data.foods };
+    return {
+      response: USDA_data,
+      edamam: false,
+      unit: unit,
+      foods: USDA_response.data.foods,
+    };
   } else {
     // Edamam API
     const edamam_url = `https://api.edamam.com/api/nutrition-data?app_id=${process.env.EDAMAM_APP_ID}&app_key=${process.env.EDAMAM_APP_KEY}&nutrition-type=logging&ingr=${foodName}`;
@@ -33,6 +38,13 @@ const getNutritionData = async (foodName, unit) => {
   }
 };
 
+const getEdamamNutritionData = async (foodName) => {
+  const edamam_url = `https://api.edamam.com/api/nutrition-data?app_id=${process.env.EDAMAM_APP_ID}&app_key=${process.env.EDAMAM_APP_KEY}&nutrition-type=logging&ingr=${foodName}`;
+  const edamam_response = await axios.get(edamam_url);
+  return { response: edamam_response.data, edamam: true };
+};
+
 module.exports = {
   getNutritionData,
+  getEdamamNutritionData,
 };
