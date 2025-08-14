@@ -38,6 +38,7 @@ function handleKnownUnitConversion(
     multiplier,
     convertedQuantity,
     convertedUnit,
+    baseServingSize
   };
 }
 
@@ -243,7 +244,6 @@ async function convertApiToBaseUnit(
   searchFoodName = null,
   originalFoodName = null
 ) {
-  debugger; // DEBUG: convertApiToBaseUnit entry - inspect all parameters
   console.log("convertApiToBaseUnit called with:", {
     inputQuantity,
     inputUnit,
@@ -254,19 +254,28 @@ async function convertApiToBaseUnit(
     originalFoodName
   });
 
-  // If no input unit, treat as quantity multiplier (e.g., "4 sandwiches")
+  // ============================================================================
+  // CASE 1: No input unit - treat as quantity multiplier (e.g., "4 bread")
+  // ============================================================================
   if (!inputUnit) {
-    console.log("No input unit, treating as quantity multiplier");
+    console.log("=== CASE 1: No input unit - quantity multiplier ===");
+    console.log("Taking first response and multiplying by", inputQuantity);
     return {
       multiplier: inputQuantity,
       convertedQuantity: inputQuantity * baseServingSize,
       convertedUnit: baseServingUnit,
+      matchedFood: null,
+      householdServing: null,
+      servingQuantity: inputQuantity,
     };
   }
 
-  // Handle known units (metric units) - keep existing functionality
+  // ============================================================================
+  // CASE 2: Known units (metric units) - use first response with conversions
+  // ============================================================================
   if (knownUnits.includes(inputUnit)) {
-    console.log("Known unit detected:", inputUnit);
+    console.log("=== CASE 2: Known unit detected -", inputUnit, "===");
+    console.log("Taking first response and performing unit conversions");
     return handleKnownUnitConversion(
       inputQuantity,
       inputUnit,
@@ -275,68 +284,44 @@ async function convertApiToBaseUnit(
     );
   }
 
-  // Handle unknown units (household units) - search USDA for matching householdServingFullText
-  console.log("Checking household units:", {
-    inputUnit,
-    isUnknownUnit: unknownUnits.includes(inputUnit),
-    hasUsdaFoods: !!usdaFoods,
-    searchFoodName,
-    unknownUnits
-  });
-  
+  // ============================================================================
+  // CASE 3: Unknown units (household units) - find matching food with householdServingFullText
+  // ============================================================================
   if (unknownUnits.includes(inputUnit) && usdaFoods && searchFoodName) {
-    console.log("Household unit condition met, processing...");
-  } else {
-    console.log("Household unit condition NOT met:", {
-      isUnknownUnit: unknownUnits.includes(inputUnit),
-      hasUsdaFoods: !!usdaFoods,
-      hasSearchFoodName: !!searchFoodName
-    });
-  }
-  
-  if (unknownUnits.includes(inputUnit) && usdaFoods && searchFoodName) {
-    debugger; // DEBUG: Processing household units - inspect usdaFoods and inputUnit
+    console.log("=== CASE 3: Unknown unit detected -", inputUnit, "===");
+    console.log("Searching for matching food with householdServingFullText");
+    
     const matchingFoods = findMatchingHouseholdFoods(
       usdaFoods,
       inputUnit,
       searchFoodName
     );
-    debugger; // DEBUG: After finding matching foods - inspect matchingFoods
-    const conversion = handleHouseholdUnitConversion(
-      matchingFoods,
-      inputQuantity,
-      inputUnit
-    );
+    
+    if (matchingFoods.length > 0) {
+      console.log("Found matching foods with household units:", matchingFoods.length);
+      const conversion = handleHouseholdUnitConversion(
+        matchingFoods,
+        inputQuantity,
+        inputUnit
+      );
 
-    if (conversion) {
-      return conversion;
+      if (conversion) {
+        console.log("Using matched food data for household unit conversion");
+        return conversion;
+      }
     }
 
-    // If no matching foods found for household units, call Edamam API with original query
-    console.log(
-      "No matching household foods found, calling Edamam API with original query:",
-      originalFoodName
-    );
-    const edamam_response = await getEdamamNutritionData(originalFoodName);
-
-    // Create a conversion object that includes household serving info for storage
-    return {
-      ...edamam_response,
-      multiplier: 1, // Edamam already provides the correct serving size
-      convertedQuantity:
-        edamam_response.response.totalWeight || baseServingSize,
-      convertedUnit: "g",
-      householdServing: `${inputQuantity} ${inputUnit}`,
-      servingQuantity: inputQuantity,
-      matchedFood: originalFoodName,
-      fromEdamam: true,
-    };
+    // If no matching foods found for household units, return null to signal fallback needed
+    console.log("No matching foods found with household units, signaling fallback needed");
+    return null;
   }
 
-  // Default Edamam API fallback for other cases
-  console.log("No specific handling found, calling Edamam API with:", originalFoodName || searchFoodName);
-  const edamam_response = await getEdamamNutritionData(originalFoodName || searchFoodName);
-  return edamam_response;
+  // ============================================================================
+  // FALLBACK: Return null to signal that no conversion was possible
+  // ============================================================================
+  console.log("=== FALLBACK: No conversion possible ===");
+  console.log("No specific handling found for input unit:", inputUnit);
+  return null;
 }
 
 module.exports = {

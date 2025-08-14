@@ -27,90 +27,133 @@
       <div v-if="searchQuery !== null">
         <h2>🍽️ {{ foodItems }}</h2>
 
-        <!-- Display parsed input information -->
-        <div v-if="foodData.parsedInput" class="parsed-info">
-          <p class="parsed-details">
-            <strong>Parsed:</strong> 
-            {{ foodData.parsedInput.number }} 
-            {{ foodData.parsedInput.quantity || '' }} 
-            {{ foodData.parsedInput.food }}
-          </p>
-        </div>
 
         <!-- Show base nutrition info if available -->
-        <div v-if="foodData.baseNutrition && foodData.parsedInput && foodData.parsedInput.number > 1" class="base-nutrition">
+        <div
+          v-if="
+            foodData.conversion &&
+            foodData.conversion.baseServingSize &&
+            foodData.parsedInput &&
+            foodData.parsedInput.number > 1
+          "
+          class="base-nutrition"
+        >
           <p class="base-info">
             <small>
-              <strong>Base nutrition:</strong> 
-              {{ Math.round(getEnergyValue(
-                foodData.baseNutrition.foodNutrients,
-                foodData.baseNutrition
-              ) * 100) / 100 }} calories per {{ foodData.baseNutrition.servingSize || foodData.baseNutrition.totalWeight || 1 }}{{ foodData.baseNutrition.servingSizeUnit || 'g' }}
+              <strong>Base nutrition:</strong>
+              {{ Math.round((foodData.calories / foodData.conversion.multiplier) * 100) / 100 }}
+              calories per {{ foodData.conversion.baseServingSize }}{{ foodData.conversion.convertedUnit }}
             </small>
           </p>
         </div>
 
         <p class="calories" v-if="foodData">
-          {{
-            Math.round(getEnergyValue(
-              foodData.foodNutrients || foodData.response?.foodNutrients || foodData.baseNutrition?.foodNutrients,
-              foodData.response || foodData.baseNutrition
-            ) * 100) / 100
-          }} calories
+          {{ foodData.calories }} calories
         </p>
-        <p class="weight" v-if="foodData">
-          {{
-            foodData.totalWeight
-              ?? foodData.response?.totalWeight
-              ?? foodData.servingSize
-              ?? foodData.response?.servingSize
-              ?? ''
-          }} {{ foodData.servingSizeUnit || foodData.response?.servingSizeUnit || 'grams' }}
+        <p class="weight" v-if="foodData && foodData.conversion">
+          {{ foodData.conversion.multiplier * foodData.conversion.baseServingSize }}{{ foodData.conversion.convertedUnit }}
         </p>
+        
+        <!-- Source and serving info -->
+        <div class="source-info" v-if="foodData">
+          <p class="source">
+            <strong>Source:</strong> {{ foodData.source.toUpperCase() }}
+            <span v-if="foodData.parsedInput">
+              | <strong>Quantity:</strong> {{ foodData.parsedInput.number }} {{ foodData.parsedInput.food }}
+            </span>
+          </p>
+        </div>
       </div>
 
-      <!-- <div class="nutrition-grid">
+      <div class="nutrition-grid">
         <div class="nutrition-section">
-          <h3> Macronutrients</h3>
+          <h3>Macronutrients</h3>
           <div class="nutrient-item">
             <span>Protein:</span>
-            <span>{{ foodData.data.macronutrients.protein }}</span>
+            <span>{{ foodData.protein }}g</span>
           </div>
           <div class="nutrient-item">
             <span>Fat:</span>
-            <span>{{ foodData.data.macronutrients.fat }}</span>
+            <span>{{ foodData.fat }}g</span>
           </div>
           <div class="nutrient-item">
             <span>Carbohydrates:</span>
-            <span>{{ foodData.data.macronutrients.carbohydrates }}</span>
+            <span>{{ foodData.carbohydrates }}g</span>
           </div>
-         
-        
+          <div class="nutrient-item">
+            <span>Fiber:</span>
+            <span>{{ foodData.fiber }}g</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Sugar:</span>
+            <span>{{ foodData.sugar }}g</span>
+          </div>
         </div>
         
-      
-          <h3> Micronutrients</h3>
+        <div class="nutrition-section">
+          <h3>Micronutrients</h3>
           <div class="nutrient-item">
             <span>Sodium:</span>
-            <span>{{ foodData.data.micronutrients.sodium }}</span>
+            <span>{{ foodData.sodium }}mg</span>
           </div>
           <div class="nutrient-item">
             <span>Potassium:</span>
-            <span>{{ foodData.data.micronutrients.potassium }}</span>
+            <span>{{ foodData.potassium }}mg</span>
           </div>
           <div class="nutrient-item">
             <span>Calcium:</span>
-            <span>{{ foodData.data.micronutrients.calcium }}</span>
+            <span>{{ foodData.calcium }}mg</span>
           </div>
           <div class="nutrient-item">
             <span>Iron:</span>
-            <span>{{ foodData.data.micronutrients.iron }}</span>
+            <span>{{ foodData.iron }}mg</span>
           </div>
           <div class="nutrient-item">
             <span>Cholesterol:</span>
-            <span>{{ foodData.data.micronutrients.cholesterol }}</span>
+            <span>{{ foodData.cholesterol }}mg</span>
           </div>
-        </div> -->
+          <div class="nutrient-item">
+            <span>Magnesium:</span>
+            <span>{{ foodData.magnesium }}mg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Phosphorus:</span>
+            <span>{{ foodData.phosphorus }}mg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Zinc:</span>
+            <span>{{ foodData.zinc }}mg</span>
+          </div>
+        </div>
+
+        <div class="nutrition-section">
+          <h3>Vitamins</h3>
+          <div class="nutrient-item">
+            <span>Vitamin A:</span>
+            <span>{{ foodData.vitaminA }}mcg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Vitamin C:</span>
+            <span>{{ foodData.vitaminC }}mg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Vitamin D:</span>
+            <span>{{ foodData.vitaminD }}mcg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Vitamin E:</span>
+            <span>{{ foodData.vitaminE }}mg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Vitamin B12:</span>
+            <span>{{ foodData.vitaminB12 }}mcg</span>
+          </div>
+          <div class="nutrient-item">
+            <span>Folate:</span>
+            <span>{{ foodData.folate }}mcg</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- <div class="message">
@@ -126,25 +169,35 @@
               <th>Calories</th>
               <th>Serving Size</th>
               <th>Household Serving</th>
+              <th>Source</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="nutrition in allNutrition" :key="nutrition._id">
               <td>{{ nutrition.name }}</td>
               <td>
-                {{ nutrition.nutrients.calories ? Math.round(nutrition.nutrients.calories * 100) / 100 : Math.round(getEnergyValue(nutrition.nutrients.foodNutrients) * 100) / 100 }}
+                {{
+                  nutrition.nutrients.calories
+                    ? Math.round(nutrition.nutrients.calories * 100) / 100
+                    : Math.round(
+                        getEnergyValue(nutrition.nutrients.foodNutrients) * 100
+                      ) / 100
+                }}
               </td>
               <td>
-                {{ nutrition.servingSize || nutrition.nutrients.servingSize || 1 }} {{ nutrition.servingSizeUnit || nutrition.nutrients.servingSizeUnit || 'g' }}
+                {{ Math.round(nutrition.baseServingSize * 100) / 100 }}
               </td>
               <td>
-                <span v-if="nutrition.householdServingInfo" class="household-serving">
-                  {{ nutrition.householdServingInfo.householdServing }}
+                <span
+                  v-if="nutrition.householdServing.servingSize"
+                  class="household-serving"
+                >
+                  {{ nutrition.householdServing.servingSize }}
+                  {{ nutrition.householdServing.servingUnit }}
                 </span>
-                <span v-else class="no-household-serving">
-                  -
-                </span>
+                <span v-else class="no-household-serving"> - </span>
               </td>
+              <td>{{ nutrition.fromUSDA ? "USDA" : "Edamam" }}</td>
             </tr>
           </tbody>
         </table>
@@ -168,11 +221,16 @@ const allNutrition = ref([]);
 
 const getEnergyValue = (foodNutrients, data) => {
   // 1. Edamam: calories at top level
-  if (data && typeof data.calories === 'number' && data.calories > 0) {
+  if (data && typeof data.calories === "number" && data.calories > 0) {
     return data.calories;
   }
   // 2. Edamam: calories in totalNutrients
-  if (data && data.totalNutrients && data.totalNutrients.ENERC_KCAL && typeof data.totalNutrients.ENERC_KCAL.quantity === 'number') {
+  if (
+    data &&
+    data.totalNutrients &&
+    data.totalNutrients.ENERC_KCAL &&
+    typeof data.totalNutrients.ENERC_KCAL.quantity === "number"
+  ) {
     return Math.round(data.totalNutrients.ENERC_KCAL.quantity);
   }
   // 3. USDA: calories in foodNutrients array
@@ -206,6 +264,7 @@ const searchFood = async () => {
 
     if (response.status === 200) {
       foodData.value = data;
+      console.log("Food data:", foodData.value);
       await getAllNutrition(); // Refresh the table after successful search/add
     } else {
       error.value = data?.message || "Food not found";
@@ -232,7 +291,6 @@ onMounted(() => {
 watch(searchQuery, () => {
   getAllNutrition();
 });
-
 </script>
 
 <style>
@@ -416,7 +474,7 @@ button:disabled {
   max-height: 320px;
   overflow-y: auto;
   border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   background: #fff;
   max-width: 500px;
   margin: 0 auto;
@@ -434,7 +492,8 @@ button:disabled {
   font-size: 0.97rem;
 }
 
-.nutrition-table th, .nutrition-table td {
+.nutrition-table th,
+.nutrition-table td {
   padding: 0.45rem 0.7rem;
   text-align: left;
 }
@@ -454,7 +513,8 @@ button:disabled {
   transition: background 0.2s;
 }
 
-.nutrition-table td, .nutrition-table th {
+.nutrition-table td,
+.nutrition-table th {
   border-right: 1px solid #f0f0f0;
 }
 
