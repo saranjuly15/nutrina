@@ -5,24 +5,10 @@ const { unknownUnits } = require("../utils/helpers");
 // DATABASE SEARCH FUNCTIONALITIES
 // ============================================================================
 
-function generateSearchTerms(cleanSearchTerm, parsedInput) {
-  let searchTerms = [cleanSearchTerm];
-  
-  if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
-    // Search for the generic format: foodname_unit (without quantity)
-    const genericPattern = `${cleanSearchTerm}_${parsedInput.quantity}`;
-    searchTerms.push(genericPattern);
-    
-    // Also try with the old patterns for backward compatibility
-    const oldPatternSearchTerm = `${cleanSearchTerm}_${parsedInput.quantity}`;
-    searchTerms.push(oldPatternSearchTerm);
-    
-    // Also try with the full household serving text pattern
-    const oldPatternWithServing = `${cleanSearchTerm}_2_${parsedInput.quantity.toUpperCase()}S`;
-    searchTerms.push(oldPatternWithServing);
-  }
-  
-  return searchTerms;
+function generateSearchTerms(cleanSearchTerm) {
+  // Since we now store one record per food, we only need the base food name
+  // Household servings are stored in the householdServings array
+  return [cleanSearchTerm];
 }
 
 async function performAtlasSearch(searchTerms, parsedInput) {
@@ -122,9 +108,12 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
   if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
     // Look for items with household serving info that matches the unit
     const householdMatches = atlasSearchResults.filter(result => 
-      result.householdServing && 
-      result.householdServing.servingUnit &&
-      result.householdServing.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
+      result.householdServings && 
+      Array.isArray(result.householdServings) &&
+      result.householdServings.some(serving => 
+        serving.servingUnit && 
+        serving.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
+      )
     );
     
     if (householdMatches.length > 0) {
@@ -144,7 +133,9 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
       const baseSearchTerms = cleanSearchTerm.toLowerCase().split(" ");
       
       // Only include items that DON'T have household serving info
-      const hasNoHouseholdInfo = !result.householdServing.servingSize;
+      const hasNoHouseholdInfo = !result.householdServings || 
+        !Array.isArray(result.householdServings) || 
+        result.householdServings.length === 0;
 
       // Check if the result name contains the main search terms
       const hasMatchingTerms = baseSearchTerms.some((term) => {
@@ -165,13 +156,24 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
 }
 
 function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResult) {
-  const householdInfo = atlasSearchResult.householdServing;
-  const servingQuantity = householdInfo.servingSize;
-  const multiplier = (quantity / servingQuantity);
+  // Find the matching household serving
+  const matchingServing = atlasSearchResult.householdServings?.find(serving => 
+    serving.servingUnit && 
+    serving.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
+  );
+  
+  if (!matchingServing) {
+    return null;
+  }
+  
+  const servingQuantity = matchingServing.servingSize;
+  // Since nutrients are stored per 1g, and we want to calculate for the total grams
+  // For 1 cup = 245g, we need to multiply by 245
+  const multiplier = servingQuantity * quantity;
   
   return {
     multiplier,
-    convertedQuantity: atlasSearchResult.baseServingSize * multiplier,
+    convertedQuantity: multiplier, // This is the total grams for the requested amount
     convertedUnit: atlasSearchResult.baseServingUnit || "g",
     matchedFood: null,
     householdServing: `${quantity} ${parsedInput.quantity}`,
@@ -189,7 +191,7 @@ async function searchDatabase(cleanSearchTerm, parsedInput) {
   console.log("Parsed input:", parsedInput);
   
   // Generate search terms
-  const searchTerms = generateSearchTerms(cleanSearchTerm, parsedInput);
+  const searchTerms = generateSearchTerms(cleanSearchTerm);
   console.log("Generated search terms:", searchTerms);
   
   // Perform Atlas search

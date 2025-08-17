@@ -3,6 +3,7 @@
 // ============================================================================
 // This service standardizes nutrition data from different API sources
 // and maps them to a common format for storage and retrieval
+// All nutrition values are normalized to per 1g/1ml basis
 
 // ============================================================================
 // NUTRITION FIELD MAPPINGS
@@ -67,6 +68,9 @@ function extractUSDANutrition(usdaData) {
     selenium: 0
   };
 
+  // Get the serving size for normalization
+  const servingSize = usdaData.servingSize || 1;
+
   // Extract nutrition values from foodNutrients array
   if (usdaData.foodNutrients && Array.isArray(usdaData.foodNutrients)) {
     usdaData.foodNutrients.forEach(nutrient => {
@@ -78,7 +82,8 @@ function extractUSDANutrition(usdaData) {
       Object.keys(NUTRITION_FIELDS).forEach(field => {
         const mapping = NUTRITION_FIELDS[field];
         if (mapping.usda === nutrientName) {
-          nutrition[field] = value;
+          // Normalize to per 1g/1ml basis
+          nutrition[field] = value / servingSize;
         }
       });
     });
@@ -119,8 +124,11 @@ function extractEdamamNutrition(edamamData) {
     selenium: 0
   };
 
+  // Get the total weight for normalization
+  const totalWeight = edamamData.totalWeight || 1;
+
   // Extract calories
-  nutrition.calories = edamamData.calories || 0;
+  nutrition.calories = (edamamData.calories || 0) / totalWeight;
 
   // Extract nutrition values from totalNutrients
   if (edamamData.totalNutrients) {
@@ -132,7 +140,8 @@ function extractEdamamNutrition(edamamData) {
       Object.keys(NUTRITION_FIELDS).forEach(field => {
         const mapping = NUTRITION_FIELDS[field];
         if (mapping.edamam === nutrientKey) {
-          nutrition[field] = value;
+          // Normalize to per 1g/1ml basis
+          nutrition[field] = value / totalWeight;
         }
       });
     });
@@ -191,7 +200,7 @@ function mapNutritionData(apiData, source) {
     // Round the nutrition values to 2 decimal places
     const roundedNutrition = roundNutritionData(nutrition);
     
-    console.log(`Successfully mapped ${source} nutrition data`);
+    console.log(`Successfully mapped ${source} nutrition data (normalized to per 1g/1ml)`);
     return roundedNutrition;
     
   } catch (error) {

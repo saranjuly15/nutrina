@@ -27,7 +27,6 @@
       <div v-if="searchQuery !== null">
         <h2>🍽️ {{ foodItems }}</h2>
 
-
         <!-- Show base nutrition info if available -->
         <div
           v-if="
@@ -41,25 +40,32 @@
           <p class="base-info">
             <small>
               <strong>Base nutrition:</strong>
-              {{ Math.round((foodData.calories / foodData.conversion.multiplier) * 100) / 100 }}
-              calories per {{ foodData.conversion.baseServingSize }}{{ foodData.conversion.convertedUnit }}
+              {{
+                Math.round(
+                  (foodData.calories / foodData.conversion.multiplier) * 100
+                ) / 100
+              }}
+              calories per {{ foodData.conversion.baseServingSize
+              }}{{ foodData.conversion.convertedUnit }}
             </small>
           </p>
         </div>
 
-        <p class="calories" v-if="foodData">
-          {{ foodData.calories }} calories
-        </p>
+        <p class="calories" v-if="foodData">{{ foodData.calories }} calories</p>
         <p class="weight" v-if="foodData && foodData.conversion">
-          {{ foodData.conversion.multiplier * foodData.conversion.baseServingSize }}{{ foodData.conversion.convertedUnit }}
+          {{
+            foodData.conversion.multiplier *
+            foodData.conversion.baseServingSize
+          }}{{ foodData.conversion.convertedUnit }}
         </p>
-        
+
         <!-- Source and serving info -->
         <div class="source-info" v-if="foodData">
           <p class="source">
             <strong>Source:</strong> {{ foodData.source.toUpperCase() }}
             <span v-if="foodData.parsedInput">
-              | <strong>Quantity:</strong> {{ foodData.parsedInput.number }} {{ foodData.parsedInput.food }}
+              | <strong>Quantity:</strong> {{ foodData.parsedInput.number }}
+              {{ foodData.parsedInput.food }}
             </span>
           </p>
         </div>
@@ -89,7 +95,7 @@
             <span>{{ foodData.sugar }}g</span>
           </div>
         </div>
-        
+
         <div class="nutrition-section">
           <h3>Micronutrients</h3>
           <div class="nutrient-item">
@@ -188,14 +194,31 @@
                 {{ Math.round(nutrition.baseServingSize * 100) / 100 }}
               </td>
               <td>
-                <span
-                  v-if="nutrition.householdServing.servingSize"
-                  class="household-serving"
+                <div
+                  v-if="nutrition.householdServings.length > 0"
+                  class="household-servings-container"
                 >
-                  {{ nutrition.householdServing.servingSize }}
-                  {{ nutrition.householdServing.servingUnit }}
+                  <div
+                    v-for="serving in nutrition.householdServings"
+                    :key="serving.servingSize"
+                    class="household-serving-item"
+                  >
+                    <span class="serving-amount">{{
+                      serving.servingSize
+                    }}</span>
+                    <span class="serving-unit">{{
+                      nutrition.baseServingUnit
+                    }}</span>
+                    <span class="serving-separator">=</span>
+                    <span class="household-unit">{{
+                      serving.servingUnit
+                    }}</span>
+                  </div>
+                </div>
+                <span v-else class="no-household-serving">
+                  <span class="no-serving-icon">—</span>
+                  <span class="no-serving-text">No household units</span>
                 </span>
-                <span v-else class="no-household-serving"> - </span>
               </td>
               <td>{{ nutrition.fromUSDA ? "USDA" : "Edamam" }}</td>
             </tr>
@@ -523,20 +546,85 @@ button:disabled {
   border-right: none;
 }
 
-.household-serving {
-  background: #e3f2fd;
+.household-servings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.household-serving-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #bbdefb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.household-serving-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, #e8f4fd 0%, #f8e8fb 100%);
+}
+
+.serving-icon {
+  font-size: 1rem;
+  opacity: 0.8;
+}
+
+.serving-amount {
+  font-weight: 700;
   color: #1976d2;
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 0.95rem;
+}
+
+.serving-unit {
+  color: #666;
   font-size: 0.85rem;
   font-weight: 500;
-  border: 1px solid #bbdefb;
+}
+
+.serving-separator {
+  color: #999;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.household-unit {
+  background: #1976d2;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 1px 3px rgba(25, 118, 210, 0.3);
 }
 
 .no-household-serving {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #999;
   font-style: italic;
   font-size: 0.9rem;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px dashed #ddd;
+}
+
+.no-serving-icon {
+  font-size: 1.2rem;
+  opacity: 0.6;
+}
+
+.no-serving-text {
+  font-size: 0.85rem;
 }
 
 .no-nutrition-msg {

@@ -63,10 +63,11 @@ const nutritionSchema = new mongoose.Schema({
         type: String,
         default: 'g',
     },
-    householdServing: {
-        servingSize: { type: Number, default: null },
-        servingUnit: { type: String, default: "" }
-    },
+    // Updated to support multiple household servings
+    householdServings: [{
+        servingSize: { type: Number, required: true },
+        servingUnit: { type: String, required: true }
+    }],
     fromUSDA: {
         type: Boolean,
         default: false,

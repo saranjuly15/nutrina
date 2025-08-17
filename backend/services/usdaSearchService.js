@@ -32,7 +32,20 @@ async function searchUSDA(quantity, parsedInput, searchFoodName, foodName) {
         return handleCase2KnownUnits(quantity, parsedInput, usdaResult, mappedNutrition, searchFoodName, foodName);
       } else {
         // CASE 3: Unknown units (e.g., "2 pieces of bread") - Search, filter by householdServingFullText
-        return handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mappedNutrition, searchFoodName, foodName);
+        const case3Result = await handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mappedNutrition);
+        
+        // If Case 3 returns null, it means no matched food was found, so we should fall back to Edamam
+        if (case3Result === null) {
+          console.log("=== USDA API SEARCH NO MATCHED FOOD (CASE 3) ===");
+          console.log("No matched food found for household units, falling back to Edamam API");
+          return {
+            success: false,
+            source: "usda",
+            message: "No matched food found for household units"
+          };
+        }
+        
+        return case3Result;
       }
     } else {
       console.log("=== USDA API SEARCH NO RESULTS ===");
@@ -131,58 +144,73 @@ async function handleCase2KnownUnits(quantity, parsedInput, usdaResult, mappedNu
 // CASE 3: Unknown units (e.g., "2 pieces of bread")
 // ============================================================================
 
-async function handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mappedNutrition, searchFoodName, foodName) {
-  console.log("CASE 3: Unknown units - Search, filter by householdServingFullText");
+async function handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mappedNutrition) {
+  console.log("=== CASE 3: Unknown units -", parsedInput.quantity, "===");
+  console.log("Taking first response and finding matched food with householdServingFullText");
   
-  const baseServingSize = usdaResult.response.servingSize || 1;
-  const baseServingUnit = usdaResult.response.servingSizeUnit || "g";
+  // Always use the first response for nutrition data
+  const firstResponse = usdaResult.response;
+  const firstResponseNutrition = mappedNutrition;
   
-  const conversion = await convertApiToBaseUnit(
-    quantity,
-    parsedInput.quantity,
-    baseServingSize,
-    baseServingUnit,
-    usdaResult.foods || null,
-    searchFoodName,
-    foodName
-  );
+  // Find the matched food with householdServingFullText
+  let matchedFood = null;
+  let householdServingFullText = "";
+  let matchedServingSize = firstResponse.servingSize || 1;
   
-  // Check if conversion failed (returned null)
-  if (!conversion) {
-    console.log("=== USDA API SEARCH NO CONVERSION POSSIBLE (CASE 3) ===");
-    return {
-      success: false,
-      source: "usda",
-      message: "USDA data found but conversion not possible"
-    };
-  }
-  
-  // If we have a matched food, use its nutrition data instead of the first response
-  let nutritionToUse = mappedNutrition;
-  if (conversion.matchedFood && usdaResult.foods) {
-    const matchedFood = usdaResult.foods.find(food => 
-      food.description === conversion.matchedFood
+  if (usdaResult.foods && usdaResult.foods.length > 0) {
+    // Search for a food item that has householdServingFullText matching our unit
+    const matchingFoods = usdaResult.foods.filter(food => 
+      food.householdServingFullText && 
+      food.householdServingFullText.toLowerCase().includes(parsedInput.quantity.toLowerCase())
     );
     
-    if (matchedFood) {
-      console.log("Using nutrition data from matched food:", conversion.matchedFood);
-      // Map the matched food's nutrition data
-      const { mapNutritionData } = require("./nutritionMappingService");
-      nutritionToUse = mapNutritionData(matchedFood, 'usda');
+    if (matchingFoods.length > 0) {
+      // Take the first matching food
+      matchedFood = matchingFoods[0];
+      householdServingFullText = matchedFood.householdServingFullText;
+      matchedServingSize = matchedFood.servingSize || 1;
+      
+      console.log("Found matched food with householdServingFullText:", matchedFood.description);
+      console.log("householdServingFullText:", householdServingFullText);
+      console.log("Matched food serving size:", matchedServingSize, matchedFood.servingSizeUnit);
     } else {
-      console.log("Matched food not found in foods array, using first response nutrition");
+      console.log("No food found with matching householdServingFullText, falling back to Edamam API");
+      // Return null to trigger fallback to Edamam API
+      return null;
     }
   } else {
-    console.log("No matched food found, using first response nutrition");
+    console.log("No foods array available, falling back to Edamam API");
+    // Return null to trigger fallback to Edamam API
+    return null;
   }
   
+  // Calculate the multiplier based on the matched food's serving size
+  const multiplier = quantity;
+  const convertedQuantity = matchedServingSize * quantity;
+  const convertedUnit = matchedFood ? matchedFood.servingSizeUnit : (firstResponse.servingSizeUnit || "g");
+  
+  const conversion = {
+    multiplier: multiplier,
+    convertedQuantity: convertedQuantity,
+    convertedUnit: convertedUnit,
+    matchedFood: matchedFood ? matchedFood.description : null,
+    householdServing: householdServingFullText,
+    servingQuantity: quantity,
+    fromUSDA: true,
+    matchedServingSize: matchedServingSize
+  };
+  
   console.log("=== USDA API SEARCH SUCCESS (CASE 3) ===");
+  console.log("Using first response nutrition data");
+  console.log("Matched food serving size:", matchedServingSize, convertedUnit);
+  console.log("Final quantity:", convertedQuantity, convertedUnit);
+  
   return {
     success: true,
     source: "usda",
     nutritionData: usdaResult,
     conversion: conversion,
-    response: nutritionToUse,
+    response: firstResponseNutrition,
     foods: usdaResult.foods
   };
 }
