@@ -104,7 +104,7 @@ async function performAtlasSearch(searchTerms, parsedInput) {
 function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInput) {
   if (atlasSearchResults.length === 0) return atlasSearchResults;
 
-  // First, try to find an exact match for household units
+  // Case 1: Searching for household units (e.g., "2 cups of milk")
   if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
     // Look for items with household serving info that matches the unit
     const householdMatches = atlasSearchResults.filter(result => 
@@ -126,7 +126,29 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
       // don't use base items - let it fall through to API search
       return [];
     }
-  } else {
+  } 
+  // Case 2: Searching for quantity without unit (e.g., "2 bread")
+  else if (parsedInput?.number && !parsedInput?.quantity) {
+    // Look for items with "serving" household serving info
+    const servingMatches = atlasSearchResults.filter(result => 
+      result.householdServings && 
+      Array.isArray(result.householdServings) &&
+      result.householdServings.some(serving => 
+        serving.servingUnit && 
+        serving.servingUnit.toLowerCase() === "serving"
+      )
+    );
+    
+    if (servingMatches.length > 0) {
+      console.log("Found serving matches:", servingMatches.map(r => r.name));
+      return servingMatches;
+    } else {
+      console.log("No serving matches found, will search API");
+      return [];
+    }
+  }
+  // Case 3: Searching for known units or no quantity
+  else {
     // For non-household units, filter for base food name (items without household serving info)
     const filteredResults = atlasSearchResults.filter((result) => {
       const resultName = result.name.toLowerCase();
@@ -157,10 +179,21 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
 
 function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResult) {
   // Find the matching household serving
-  const matchingServing = atlasSearchResult.householdServings?.find(serving => 
-    serving.servingUnit && 
-    serving.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
-  );
+  let matchingServing;
+  
+  if (parsedInput?.quantity) {
+    // Case 1: Household units (e.g., "2 cups of milk")
+    matchingServing = atlasSearchResult.householdServings?.find(serving => 
+      serving.servingUnit && 
+      serving.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
+    );
+  } else if (parsedInput?.number) {
+    // Case 2: Quantity without unit (e.g., "2 bread")
+    matchingServing = atlasSearchResult.householdServings?.find(serving => 
+      serving.servingUnit && 
+      serving.servingUnit.toLowerCase() === "serving"
+    );
+  }
   
   if (!matchingServing) {
     return null;
@@ -171,12 +204,20 @@ function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResu
   // For 1 cup = 245g, we need to multiply by 245
   const multiplier = servingQuantity * quantity;
   
+  // Create household serving text
+  let householdServingText;
+  if (parsedInput?.quantity) {
+    householdServingText = `${quantity} ${parsedInput.quantity}`;
+  } else {
+    householdServingText = `${quantity} serving`;
+  }
+  
   return {
     multiplier,
     convertedQuantity: multiplier, // This is the total grams for the requested amount
     convertedUnit: atlasSearchResult.baseServingUnit || "g",
     matchedFood: null,
-    householdServing: `${quantity} ${parsedInput.quantity}`,
+    householdServing: householdServingText,
     servingQuantity: servingQuantity,
   };
 }

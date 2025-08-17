@@ -78,13 +78,17 @@ function handleCase1NoUnit(quantity, usdaResult, mappedNutrition) {
   const baseServingSize = usdaResult.response.servingSize || 1;
   const baseServingUnit = usdaResult.response.servingSizeUnit || "g";
   
+  // For Case 1, we want to store a standard household serving
+  // Use the base serving size as the household serving size
+  const householdServing = `${baseServingSize} ${baseServingUnit}`;
+  
   const conversion = {
     multiplier: quantity, // Simple quantity multiplier
     convertedQuantity: baseServingSize * quantity,
     convertedUnit: baseServingUnit,
     matchedFood: null,
-    householdServing: null,
-    servingQuantity: 1,
+    householdServing: householdServing,
+    servingQuantity: baseServingSize,
     fromUSDA: true
   };
   

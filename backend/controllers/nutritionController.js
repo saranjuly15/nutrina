@@ -44,7 +44,14 @@ async function saveNutritionData(storageName, nutritionDataToSave, conversion, d
         servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
       }
       
-      const servingUnit = householdText.split(' ')[1] || (parsedInput?.quantity || "");
+      // For Case 1 (no quantity specified), use "serving" as the unit
+      let servingUnit;
+      if (!parsedInput?.quantity) {
+        servingUnit = "serving";
+      } else {
+        // For household units, use the parsed quantity
+        servingUnit = parsedInput.quantity;
+      }
       
       // Check if this household serving already exists
       const existingServing = existingRecord.householdServings.find(serving => 
@@ -106,7 +113,14 @@ function createNutritionDocument(storageName, mappedNutrition, conversion, sourc
       servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
     }
     
-    const servingUnit = householdText.split(' ')[1] || (parsedInput?.quantity || "");
+    // For Case 1 (no quantity specified), use "serving" as the unit
+    let servingUnit;
+    if (!parsedInput?.quantity) {
+      servingUnit = "serving";
+    } else {
+      // For household units, use the parsed quantity
+      servingUnit = parsedInput.quantity;
+    }
     
     householdServings.push({
       servingSize: servingSize,
@@ -187,8 +201,8 @@ const getNutrition = async (req, res) => {
       if (atlasSearchResults[0].householdServings && 
           Array.isArray(atlasSearchResults[0].householdServings) && 
           atlasSearchResults[0].householdServings.length > 0 && 
-          parsedInput?.quantity && 
-          unknownUnits.includes(parsedInput.quantity)) {
+          ((parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) ||
+           (parsedInput?.number && !parsedInput?.quantity))) {
         // Use stored household serving information
         conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
       } else {
