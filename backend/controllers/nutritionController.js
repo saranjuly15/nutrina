@@ -1,6 +1,10 @@
 const Nutrition = require("../models/Nutrition");
-const { normalizeFoodName, parseFoodInput, unknownUnits, knownUnits } = require("../utils/helpers");
+const { normalizeFoodName, parseFoodInput, knownUnits } = require("../utils/helpers");
 const { performCompleteSearch, createHouseholdServingConversion } = require("../services/searchService");
+const { searchDatabase } = require("../services/databaseSearchService");
+const { searchUSDA } = require("../services/usdaSearchService");
+const { searchEdamam } = require("../services/edamamSearchService");
+const { extractUSDANutrition, extractEdamamNutrition } = require("../services/nutritionMappingService");
 
 
 // Nutrition Calculation Functions
@@ -44,10 +48,10 @@ async function saveNutritionData(storageName, nutritionDataToSave, conversion, d
         servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
       }
       
-      // For Case 1 (no quantity specified), use "serving" as the unit
+      // For Case 1 (no quantity specified), use "default" as the unit
       let servingUnit;
       if (!parsedInput?.quantity) {
-        servingUnit = "serving";
+        servingUnit = "default";
       } else {
         // For household units, use the parsed quantity
         servingUnit = parsedInput.quantity;
@@ -113,10 +117,10 @@ function createNutritionDocument(storageName, mappedNutrition, conversion, sourc
       servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
     }
     
-    // For Case 1 (no quantity specified), use "serving" as the unit
+    // For Case 1 (no quantity specified), use "default" as the unit
     let servingUnit;
     if (!parsedInput?.quantity) {
-      servingUnit = "serving";
+      servingUnit = "default";
     } else {
       // For household units, use the parsed quantity
       servingUnit = parsedInput.quantity;
@@ -192,31 +196,29 @@ const getNutrition = async (req, res) => {
       // Use the nutrients directly from database (already in standardized format)
       const nutrients = atlasSearchResults[0].nutrients;
 
-      // Calculate proper multiplier based on units
-      const baseServingSize = atlasSearchResults[0].baseServingSize || 1;
-      const baseServingUnit = atlasSearchResults[0].baseServingUnit || "g";
+             // Nutrition data is stored per 1g, so we need to apply proper conversion
       
-      // Use stored household serving info if available
-      let conversion;
-      if (atlasSearchResults[0].householdServings && 
-          Array.isArray(atlasSearchResults[0].householdServings) && 
-          atlasSearchResults[0].householdServings.length > 0 && 
-          ((parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) ||
-           (parsedInput?.number && !parsedInput?.quantity))) {
-        // Use stored household serving information
-        conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
-      } else {
-        // Use regular conversion for known units or no unit
-        const { convertAtlasSearchToBaseUnit } = require("../utils/baseUnitConverter");
-        conversion = await convertAtlasSearchToBaseUnit(
-          quantity,
-          parsedInput?.quantity,
-          baseServingSize,
-          baseServingUnit,
-          searchFoodName,
-          foodName
-        );
-      }
+             // Check if we have household servings and should use them
+       const hasHouseholdServings = atlasSearchResults[0].householdServings && 
+         Array.isArray(atlasSearchResults[0].householdServings) && 
+         atlasSearchResults[0].householdServings.length > 0;
+       
+       let conversion = null;
+       
+       if (hasHouseholdServings) {
+         // Try to use household serving conversion
+         conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
+         
+         if (!conversion) {
+           // No matching household serving found, need to go to APIs
+           console.log("No matching household serving found, falling back to APIs");
+           throw new Error("No matching household serving found");
+         }
+       } else {
+         // No household servings available, need to go to APIs
+         console.log("No household servings available, falling back to APIs");
+         throw new Error("No household servings available");
+       }
 
       // Since nutrition data is now normalized to per 1g/1ml, multiply by the converted quantity
       const convertedQuantity = conversion ? conversion.convertedQuantity : quantity;
@@ -356,9 +358,183 @@ const getAllNutrition = async (req, res) => {
   }
 };
 
+const getBulkNutrition = async (req, res) => {
+  try {
+    const { foodItems } = req.body;
 
+    if (!foodItems || !Array.isArray(foodItems)) {
+      return res.status(400).json({
+        status: "error",
+        message: "foodItems array is required"
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const item of foodItems) {
+      try {
+        const { name, quantity, unit } = item;
+        
+        if (!name) {
+          errors.push({
+            name: name || 'unknown',
+            error: "Food name is required"
+          });
+          continue;
+        }
+
+        const quantityNum = parseFloat(quantity) || 1;
+        const foodName = unit ? `${quantityNum} ${unit} ${name}` : `${quantityNum} ${name}`;
+
+        // Try database first
+        const databaseResult = await searchDatabase(name, { number: quantityNum, quantity: unit, food: name });
+        console.log("Database result:", databaseResult);
+                 if (databaseResult && databaseResult.success && databaseResult.selectedResult && databaseResult.selectedResult.nutrients) {
+           // Check if we have household servings and should use them
+           const hasHouseholdServings = databaseResult.selectedResult.householdServings && 
+             Array.isArray(databaseResult.selectedResult.householdServings) && 
+             databaseResult.selectedResult.householdServings.length > 0;
+           
+           let conversion = null;
+           let multiplier = quantityNum;
+           
+           if (hasHouseholdServings) {
+             // Try to use household serving conversion
+             const { createHouseholdServingConversion } = require("../services/databaseSearchService");
+             conversion = createHouseholdServingConversion(quantityNum, { number: quantityNum, quantity: unit, food: name }, databaseResult.selectedResult);
+             
+             console.log("Household serving conversion:", conversion);
+             console.log("Database result household servings:", databaseResult.selectedResult.householdServings);
+             console.log("Parsed input for conversion:", { number: quantityNum, quantity: unit, food: name });
+             
+             if (conversion) {
+               multiplier = conversion.multiplier;
+             } else {
+               // No matching household serving found, need to go to APIs
+               console.log("No matching household serving found, falling back to APIs");
+               throw new Error("No matching household serving found");
+             }
+           } else {
+             // No household servings available, need to go to APIs
+             console.log("No household servings available, falling back to APIs");
+             throw new Error("No household servings available");
+           }
+          
+          console.log("Using multiplier:", multiplier, "for food:", foodName);
+          
+          const calculatedNutrients = {};
+          Object.keys(databaseResult.selectedResult.nutrients).forEach(nutrient => {
+            const originalValue = databaseResult.selectedResult.nutrients[nutrient];
+            const calculatedValue = originalValue * multiplier;
+            calculatedNutrients[nutrient] = calculatedValue;
+            console.log(`${nutrient}: ${originalValue} * ${multiplier} = ${calculatedValue}`);
+          });
+
+          results.push({
+            name: foodName,
+            ...calculatedNutrients,
+            source: "database"
+          });
+          continue;
+        }
+
+        // If not in database, try USDA API
+        console.log("Bulk API - Trying USDA API for:", name, "with parsed input:", { number: quantityNum, quantity: unit, food: name });
+        const usdaResult = await searchUSDA(quantityNum, { number: quantityNum, quantity: unit, food: name }, name, `${quantityNum} ${unit ? unit + ' ' : ''}${name}`);
+        
+        if (usdaResult.success) {
+          console.log("USDA result conversion:", usdaResult.conversion);
+          console.log("USDA result nutrition data:", usdaResult.nutritionData.response);
+          
+          const mappedNutrition = extractUSDANutrition(usdaResult.nutritionData.response);
+          console.log("Mapped nutrition (per 1g):", mappedNutrition);
+          
+          const calculatedNutrition = {};
+          const multiplier = usdaResult.conversion.multiplier;
+          console.log("Using multiplier:", multiplier, "for food:", foodName);
+          
+          Object.keys(mappedNutrition).forEach(nutrient => {
+            const originalValue = mappedNutrition[nutrient];
+            const calculatedValue = originalValue * multiplier;
+            calculatedNutrition[nutrient] = calculatedValue;
+            console.log(`${nutrient}: ${originalValue} * ${multiplier} = ${calculatedValue}`);
+          });
+
+          // Save to database
+          await saveNutritionData(name, mappedNutrition, usdaResult.conversion, 'usda', usdaResult.nutritionData.response.servingSize, usdaResult.nutritionData.response.servingSizeUnit, { number: quantityNum, quantity: unit, food: name });
+
+          results.push({
+            name: foodName,
+            ...calculatedNutrition,
+            source: "usda"
+          });
+          continue;
+        }
+
+        // If USDA fails, try Edamam API
+        const edamamResult = await searchEdamam(quantityNum, { number: quantityNum, quantity: unit, food: name }, name, `${quantityNum} ${unit ? unit + ' ' : ''}${name}`);
+        
+        if (edamamResult.success) {
+          const mappedNutrition = extractEdamamNutrition(edamamResult.nutritionData.response);
+          const calculatedNutrition = {};
+          
+          Object.keys(mappedNutrition).forEach(nutrient => {
+            calculatedNutrition[nutrient] = mappedNutrition[nutrient] * edamamResult.conversion.multiplier;
+          });
+
+          // Save to database
+          await saveNutritionData(name, mappedNutrition, edamamResult.conversion, 'edamam', edamamResult.nutritionData.response.totalWeight, 'g', { number: quantityNum, quantity: unit, food: name });
+
+          results.push({
+            name: foodName,
+            ...calculatedNutrition,
+            source: "edamam"
+          });
+          continue;
+        }
+
+        // If all searches fail
+        errors.push({
+          name: foodName,
+          error: "No nutrition data found"
+        });
+
+      } catch (error) {
+        console.error(`Error processing food item ${item.name}:`, error);
+        errors.push({
+          name: item.name,
+          error: error.message
+        });
+      }
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        status: "error",
+        message: "No nutrition data found for any of the provided food items",
+        errors: errors
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: results,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error("Bulk nutrition error:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
 
 module.exports = {
   getNutrition,
   getAllNutrition,
+  getBulkNutrition,
 };

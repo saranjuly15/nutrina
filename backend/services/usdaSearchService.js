@@ -189,12 +189,11 @@ async function handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mapped
   }
   
   // Calculate the multiplier based on the matched food's serving size
-  const multiplier = quantity;
   const convertedQuantity = matchedServingSize * quantity;
   const convertedUnit = matchedFood ? matchedFood.servingSizeUnit : (firstResponse.servingSizeUnit || "g");
   
   const conversion = {
-    multiplier: multiplier,
+    multiplier: convertedQuantity, // Use convertedQuantity as multiplier (e.g., 220 for 1 bowl)
     convertedQuantity: convertedQuantity,
     convertedUnit: convertedUnit,
     matchedFood: matchedFood ? matchedFood.description : null,

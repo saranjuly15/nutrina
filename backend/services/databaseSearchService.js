@@ -129,13 +129,13 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
   } 
   // Case 2: Searching for quantity without unit (e.g., "2 bread")
   else if (parsedInput?.number && !parsedInput?.quantity) {
-    // Look for items with "serving" household serving info
+    // Look for items with "default" household serving info
     const servingMatches = atlasSearchResults.filter(result => 
       result.householdServings && 
       Array.isArray(result.householdServings) &&
       result.householdServings.some(serving => 
         serving.servingUnit && 
-        serving.servingUnit.toLowerCase() === "serving"
+        serving.servingUnit.toLowerCase() === "default"
       )
     );
     
@@ -191,7 +191,13 @@ function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResu
     // Case 2: Quantity without unit (e.g., "2 bread")
     matchingServing = atlasSearchResult.householdServings?.find(serving => 
       serving.servingUnit && 
-      serving.servingUnit.toLowerCase() === "serving"
+      serving.servingUnit.toLowerCase() === "default"
+    );
+  } else {
+    // Case 3: No quantity specified (e.g., "chicken pizza") - use default serving
+    matchingServing = atlasSearchResult.householdServings?.find(serving => 
+      serving.servingUnit && 
+      serving.servingUnit.toLowerCase() === "default"
     );
   }
   
