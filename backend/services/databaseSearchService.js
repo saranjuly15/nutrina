@@ -1,5 +1,6 @@
 const Nutrition = require("../models/Nutrition");
 const { unknownUnits } = require("../utils/helpers");
+const pluralize = require("pluralize");
 
 // ============================================================================
 // DATABASE SEARCH FUNCTIONALITIES
@@ -177,55 +178,76 @@ function filterAtlasSearchResults(atlasSearchResults, cleanSearchTerm, parsedInp
   return atlasSearchResults;
 }
 
-function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResult) {
-  // Find the matching household serving
-  let matchingServing;
+async function createHouseholdServingConversion(quantity, parsedInput, atlasSearchResult) {
+  // Use the proper unit conversion logic from baseUnitConverter
+  const { convertAtlasSearchToBaseUnit } = require("../utils/baseUnitConverter");
   
-  if (parsedInput?.quantity) {
-    // Case 1: Household units (e.g., "2 cups of milk")
-    matchingServing = atlasSearchResult.householdServings?.find(serving => 
-      serving.servingUnit && 
-      serving.servingUnit.toLowerCase().includes(parsedInput.quantity.toLowerCase())
+  // Check if we have household servings and should use them for calculation
+  const hasHouseholdServings = atlasSearchResult.householdServings && 
+    Array.isArray(atlasSearchResult.householdServings) && 
+    atlasSearchResult.householdServings.length > 0;
+  
+  let baseServingSize = atlasSearchResult.baseServingSize;
+  let baseServingUnit = atlasSearchResult.baseServingUnit;
+  
+  // If we have household servings and no input unit (Case 1), use the household serving size
+  if (hasHouseholdServings && !parsedInput?.quantity) {
+    // Find the "default" household serving
+    const defaultServing = atlasSearchResult.householdServings.find(serving => 
+      serving.servingUnit === "default"
     );
-  } else if (parsedInput?.number) {
-    // Case 2: Quantity without unit (e.g., "2 bread")
-    matchingServing = atlasSearchResult.householdServings?.find(serving => 
-      serving.servingUnit && 
-      serving.servingUnit.toLowerCase() === "default"
+    
+    if (defaultServing) {
+      // Use the household serving size instead of baseServingSize
+      baseServingSize = defaultServing.servingSize;
+    }
+  }
+  // If we have household servings and the input unit matches a household serving (Case 3)
+  else if (hasHouseholdServings && parsedInput?.quantity) {
+    // Try exact match with singular/plural handling
+    const inputUnit = parsedInput.quantity.toLowerCase();
+    
+    // Try exact match first
+    let matchingServing = atlasSearchResult.householdServings.find(serving => 
+      serving.servingUnit && serving.servingUnit.toLowerCase() === inputUnit
     );
-  } else {
-    // Case 3: No quantity specified (e.g., "chicken pizza") - use default serving
-    matchingServing = atlasSearchResult.householdServings?.find(serving => 
-      serving.servingUnit && 
-      serving.servingUnit.toLowerCase() === "default"
-    );
+    
+    // If no exact match, try singular form
+    if (!matchingServing) {
+      const singularInputUnit = pluralize.singular(inputUnit);
+      matchingServing = atlasSearchResult.householdServings.find(serving => 
+        serving.servingUnit && serving.servingUnit.toLowerCase() === singularInputUnit
+      );
+    }
+    
+    // If still no match, try plural form
+    if (!matchingServing) {
+      const pluralInputUnit = pluralize.plural(inputUnit);
+      matchingServing = atlasSearchResult.householdServings.find(serving => 
+        serving.servingUnit && serving.servingUnit.toLowerCase() === pluralInputUnit
+      );
+    }
+    
+    if (matchingServing) {
+      // Use the household serving size instead of baseServingSize
+      baseServingSize = matchingServing.servingSize;
+    } else {
+      console.log("No matching household serving found for unit:", parsedInput.quantity);
+      // Return null to signal that no matching household serving was found
+      // This will trigger fallback to external APIs
+      return null;
+    }
   }
   
-  if (!matchingServing) {
-    return null;
-  }
+  // Convert the input using the proper unit conversion logic
+  const conversion = await convertAtlasSearchToBaseUnit(
+    quantity,
+    parsedInput?.quantity,
+    baseServingSize,
+    baseServingUnit
+  );
   
-  const servingQuantity = matchingServing.servingSize;
-  // Since nutrients are stored per 1g, and we want to calculate for the total grams
-  // For 1 cup = 245g, we need to multiply by 245
-  const multiplier = servingQuantity * quantity;
-  
-  // Create household serving text
-  let householdServingText;
-  if (parsedInput?.quantity) {
-    householdServingText = `${quantity} ${parsedInput.quantity}`;
-  } else {
-    householdServingText = `${quantity} serving`;
-  }
-  
-  return {
-    multiplier,
-    convertedQuantity: multiplier, // This is the total grams for the requested amount
-    convertedUnit: atlasSearchResult.baseServingUnit || "g",
-    matchedFood: null,
-    householdServing: householdServingText,
-    servingQuantity: servingQuantity,
-  };
+  return conversion;
 }
 
 // ============================================================================

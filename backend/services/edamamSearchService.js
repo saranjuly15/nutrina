@@ -2,18 +2,20 @@ const { getEdamamNutritionData } = require("./externalApiServices");
 const { mapNutritionData } = require("./nutritionMappingService");
 
 // ============================================================================
-// EDAMAM API SEARCH (Simplified - No Complex Conversions)
+// EDAMAM API SEARCH SERVICE
 // ============================================================================
 
+/**
+ * Searches Edamam API for nutrition data
+ * Note: Edamam search is simplified - we send the complete food name to Edamam
+ * (e.g., "6 slices of chicken fricot") and use the response directly
+ * No conversions or multiplications needed
+ */
 async function searchEdamam(quantity, parsedInput, searchFoodName, foodName) {
   console.log("=== EDAMAM API SEARCH START ===");
   console.log("Searching Edamam for:", foodName);
   console.log("Quantity:", quantity);
   console.log("Parsed input:", parsedInput);
-  
-  // Note: Edamam search is simplified - we send the complete food name to Edamam
-  // (e.g., "6 slices of chicken fricot") and use the response directly
-  // No conversions or multiplications needed
   
   try {
     // Call Edamam API with the complete food name
@@ -26,12 +28,12 @@ async function searchEdamam(quantity, parsedInput, searchFoodName, foodName) {
       const mappedNutrition = mapNutritionData(edamamResult.response, 'edamam');
       
       // For Edamam, we use the data directly as returned
-      // No conversions needed since Edamam gives us nutrition for the exact request
+      // Nutrition data is normalized to per 1g, so we need to multiply by total weight
       const baseServingSize = edamamResult.response.totalWeight || 1;
       const baseServingUnit = "g";
       
       const conversion = {
-        multiplier: 1, // No multiplication needed - data is already for the requested amount
+        multiplier: baseServingSize, // Multiply by total weight since data is per 1g
         convertedQuantity: baseServingSize,
         convertedUnit: baseServingUnit,
         matchedFood: null,
@@ -41,6 +43,7 @@ async function searchEdamam(quantity, parsedInput, searchFoodName, foodName) {
       };
       
       console.log("=== EDAMAM API SEARCH SUCCESS ===");
+      console.log("Edamam conversion:", conversion);
       return {
         success: true,
         source: "edamam",
@@ -69,6 +72,10 @@ async function searchEdamam(quantity, parsedInput, searchFoodName, foodName) {
     };
   }
 }
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
 
 module.exports = {
   searchEdamam

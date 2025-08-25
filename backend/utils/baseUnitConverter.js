@@ -1,7 +1,13 @@
-const { getEdamamNutritionData } = require("../services/externalApiServices");
 const { knownUnits, unknownUnits } = require("./helpers");
+const pluralize = require("pluralize");
 
-// Conversion Functions
+// ============================================================================
+// UNIT CONVERSION FUNCTIONS
+// ============================================================================
+
+/**
+ * Handles conversion for known metric units (ml, g, kg, mg, litre, l)
+ */
 function handleKnownUnitConversion(
   inputQuantity,
   inputUnit,
@@ -14,17 +20,31 @@ function handleKnownUnitConversion(
 
   // Handle common unit conversions
   if (inputUnit === "ml" && baseServingUnit === "ml") {
-    multiplier = inputQuantity / baseServingSize;
+    // Since nutrition data is normalized to per 1ml, the multiplier should be the total ml
+    multiplier = inputQuantity;
     convertedQuantity = inputQuantity;
     convertedUnit = "ml";
   } else if (inputUnit === "g" && baseServingUnit === "g") {
-    multiplier = inputQuantity / baseServingSize;
+    // Since nutrition data is normalized to per 1g, the multiplier should be the total g
+    multiplier = inputQuantity;
     convertedQuantity = inputQuantity;
     convertedUnit = "g";
-  } else if (inputUnit === "litre" && baseServingUnit === "ml") {
+  } else if (inputUnit === "kg" && baseServingUnit === "g") {
+    // 1 kg = 1000g
+    const kgInG = inputQuantity * 1000;
+    multiplier = kgInG;
+    convertedQuantity = kgInG;
+    convertedUnit = "g";
+  } else if (inputUnit === "mg" && baseServingUnit === "g") {
+    // 1 g = 1000mg
+    const mgInG = inputQuantity / 1000;
+    multiplier = mgInG;
+    convertedQuantity = mgInG;
+    convertedUnit = "g";
+  } else if ((inputUnit === "litre" || inputUnit === "l")) {
     // 1 litre = 1000ml
     const litreInMl = inputQuantity * 1000;
-    multiplier = litreInMl / baseServingSize;
+    multiplier = litreInMl;
     convertedQuantity = litreInMl;
     convertedUnit = "ml";
   } else {
@@ -38,10 +58,19 @@ function handleKnownUnitConversion(
     multiplier,
     convertedQuantity,
     convertedUnit,
-    baseServingSize
+    baseServingSize,
+    householdServing: `${inputQuantity} ${inputUnit}`,
+    servingQuantity: inputQuantity
   };
 }
 
+// ============================================================================
+// HOUSEHOLD UNIT FUNCTIONS
+// ============================================================================
+
+/**
+ * Finds foods that match both the household serving text and the food description
+ */
 function findMatchingHouseholdFoods(usdaFoods, inputUnit, searchFoodName) {
   const searchFoodLower = searchFoodName.toLowerCase();
 
@@ -84,6 +113,7 @@ function findMatchingHouseholdFoods(usdaFoods, inputUnit, searchFoodName) {
     return hasMatchingServing && hasMatchingDescription;
   });
 
+  // Sort by serving size for better matching
   matchingFoods.sort((a, b) => {
     const aMatch = a.householdServingFullText.match(/(\d+(?:\.\d+)?)/);
     const bMatch = b.householdServingFullText.match(/(\d+(?:\.\d+)?)/);
@@ -97,6 +127,9 @@ function findMatchingHouseholdFoods(usdaFoods, inputUnit, searchFoodName) {
   return matchingFoods;
 }
 
+/**
+ * Extracts the serving quantity from household serving text
+ */
 function extractServingQuantity(householdServingText, inputUnit) {
   let servingQuantity = 1; // Default to 1
 
@@ -140,6 +173,9 @@ function extractServingQuantity(householdServingText, inputUnit) {
   return servingQuantity;
 }
 
+/**
+ * Handles conversion for household units (slice, piece, cup, etc.)
+ */
 function handleHouseholdUnitConversion(
   matchingFoods,
   inputQuantity,
@@ -165,15 +201,21 @@ function handleHouseholdUnitConversion(
     inputUnit
   );
 
-  // Calculate multiplier: if USDA says "2 slices" and user wants "1 slice",
-  // then multiplier = 1/2 = 0.5 (so we multiply calories by 0.5)
-  const multiplier = inputQuantity / servingQuantity;
+  // Calculate the weight per unit: if USDA says "2 slices = 152g", then 1 slice = 76g
+  const weightPerUnit = matchedFood.servingSize / servingQuantity;
+  
+  // Calculate the total weight for the requested quantity
+  const convertedQuantity = weightPerUnit * inputQuantity;
+  
+  // Since nutrition data is normalized to per 1g, the multiplier should be the total grams
+  const multiplier = convertedQuantity;
 
   console.log("Calculation:", {
     inputQuantity,
     servingQuantity,
+    weightPerUnit,
     multiplier,
-    convertedQuantity: matchedFood.servingSize * multiplier,
+    convertedQuantity: convertedQuantity,
     convertedUnit: matchedFood.servingSizeUnit || "g",
     matchedFood: matchedFood.description,
     householdServing: householdServingText,
@@ -181,7 +223,7 @@ function handleHouseholdUnitConversion(
 
   return {
     multiplier,
-    convertedQuantity: matchedFood.servingSize * multiplier,
+    convertedQuantity: convertedQuantity,
     convertedUnit: matchedFood.servingSizeUnit || "g",
     matchedFood: matchedFood.description,
     householdServing: householdServingText,
@@ -189,21 +231,28 @@ function handleHouseholdUnitConversion(
   };
 }
 
-// Atlas Search Conversion Function (for database results)
+// ============================================================================
+// MAIN CONVERSION FUNCTIONS
+// ============================================================================
+
+/**
+ * Converts Atlas search results to base units (for database results)
+ */
 async function convertAtlasSearchToBaseUnit(
   inputQuantity,
   inputUnit,
   baseServingSize,
-  baseServingUnit,
-  searchFoodName = null,
-  originalFoodName = null
+  baseServingUnit
 ) {
   // If no input unit, treat as quantity multiplier (e.g., "4 sandwiches")
   if (!inputUnit) {
+    const totalWeight = inputQuantity * baseServingSize;
     return {
-      multiplier: inputQuantity,
-      convertedQuantity: inputQuantity * baseServingSize,
+      multiplier: totalWeight, // Total weight multiplier (e.g., 112 for 4 bread × 28g)
+      convertedQuantity: totalWeight,
       convertedUnit: baseServingUnit,
+      householdServing: `${baseServingSize} ${baseServingUnit}`,
+      servingQuantity: baseServingSize
     };
   }
 
@@ -217,13 +266,22 @@ async function convertAtlasSearchToBaseUnit(
     );
   }
 
-  // For household units in Atlas search, we don't have USDA foods to search through
-  // So we fall back to Edamam API
-  if (unknownUnits.includes(inputUnit)) {
-    const edamam_response = await getEdamamNutritionData(
-      originalFoodName || searchFoodName
-    );
-    return edamam_response;
+  // For household units in Atlas search, we should use the household serving information
+  // from the database record, not fall back to Edamam API
+  // Convert to singular form for comparison
+  const singularInputUnit = pluralize.singular(inputUnit);
+  
+  if (unknownUnits.includes(singularInputUnit)) {
+    // Since this is called from database search, we should have household serving info
+    // The household serving size should be passed as baseServingSize from the database
+    const totalWeight = inputQuantity * baseServingSize;
+    return {
+      multiplier: totalWeight,
+      convertedQuantity: totalWeight,
+      convertedUnit: baseServingUnit,
+      householdServing: `${baseServingSize} ${baseServingUnit}`,
+      servingQuantity: baseServingSize
+    };
   }
 
   // Default fallback
@@ -234,7 +292,9 @@ async function convertAtlasSearchToBaseUnit(
   };
 }
 
-// API Conversion Function (for external API results)
+/**
+ * Converts API results to base units (for external API results)
+ */
 async function convertApiToBaseUnit(
   inputQuantity,
   inputUnit,
@@ -260,13 +320,17 @@ async function convertApiToBaseUnit(
   if (!inputUnit) {
     console.log("=== CASE 1: No input unit - quantity multiplier ===");
     console.log("Taking first response and multiplying by", inputQuantity);
+    
+    // Calculate total weight: quantity × baseServingSize
+    const totalWeight = inputQuantity * baseServingSize;
+    
     return {
-      multiplier: inputQuantity,
-      convertedQuantity: inputQuantity * baseServingSize,
+      multiplier: totalWeight, // Total weight multiplier (e.g., 112 for 4 bread × 28g)
+      convertedQuantity: totalWeight,
       convertedUnit: baseServingUnit,
       matchedFood: null,
-      householdServing: null,
-      servingQuantity: inputQuantity,
+      householdServing: `${baseServingSize} ${baseServingUnit}`,
+      servingQuantity: baseServingSize,
     };
   }
 
@@ -324,7 +388,20 @@ async function convertApiToBaseUnit(
   return null;
 }
 
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
+  // Main conversion functions
   convertAtlasSearchToBaseUnit,
   convertApiToBaseUnit,
+  
+  // Unit conversion helpers
+  handleKnownUnitConversion,
+  handleHouseholdUnitConversion,
+  
+  // Household unit helpers
+  findMatchingHouseholdFoods,
+  extractServingQuantity
 };

@@ -75,9 +75,8 @@ function extractUSDANutrition(usdaData) {
   if (usdaData.foodNutrients && Array.isArray(usdaData.foodNutrients)) {
     usdaData.foodNutrients.forEach(nutrient => {
       const nutrientName = nutrient.nutrientName;
-      console.log("Nutrient name:", nutrientName);
+      console.log(nutrientName + " : " + nutrient.value);
       const value = nutrient.value || 0;
-      console.log("Nutrient value:", value);
       // Map each nutrient to our standardized fields
       Object.keys(NUTRITION_FIELDS).forEach(field => {
         const mapping = NUTRITION_FIELDS[field];

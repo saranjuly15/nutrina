@@ -1,12 +1,16 @@
 const pluralize = require("pluralize");
 
-// Constants
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 const knownUnits = [
   "ml",
   "g",
   "kg",
   "mg",
   "litre",
+  "l", // Add "l" as an alias for litre
 ];
 
 const unknownUnits = [
@@ -29,13 +33,20 @@ const unknownUnits = [
   "carton"
 ];
 
-// Utility Functions
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Normalizes food names by removing numbers, extra spaces, and handling plurals
+ */
 function normalizeFoodName(name) {
   let clean = name
     .toLowerCase()
     .replace(/^[0-9]+\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
+    
   if (clean.endsWith("ies") && clean.length > 4) {
     clean = clean.slice(0, -3) + "y";
   } else if (
@@ -50,9 +61,17 @@ function normalizeFoodName(name) {
   } else if (clean.endsWith("s") && !clean.endsWith("ss") && clean.length > 4) {
     clean = clean.slice(0, -1);
   }
+  
   return clean;
 }
 
+/**
+ * Parses food input to extract quantity, unit, and food name
+ * Examples:
+ * - "2 cups of milk" -> { number: 2, quantity: "cup", food: "milk" }
+ * - "500 ml water" -> { number: 500, quantity: "ml", food: "water" }
+ * - "3 bread" -> { number: 3, quantity: null, food: "bread" }
+ */
 function parseFoodInput(input) {
   input = input.trim().toLowerCase();
 
@@ -84,9 +103,16 @@ function parseFoodInput(input) {
   };
 }
 
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 module.exports = {
-  normalizeFoodName,
-  parseFoodInput,
+  // Constants
   knownUnits,
   unknownUnits,
+  
+  // Utility functions
+  normalizeFoodName,
+  parseFoodInput,
 };

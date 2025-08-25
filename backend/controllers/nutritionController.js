@@ -5,6 +5,7 @@ const { searchDatabase } = require("../services/databaseSearchService");
 const { searchUSDA } = require("../services/usdaSearchService");
 const { searchEdamam } = require("../services/edamamSearchService");
 const { extractUSDANutrition, extractEdamamNutrition } = require("../services/nutritionMappingService");
+const pluralize = require("pluralize");
 
 
 // Nutrition Calculation Functions
@@ -36,43 +37,79 @@ async function saveNutritionData(storageName, nutritionDataToSave, conversion, d
   if (existingRecord) {
     console.log("Found existing record for:", storageName);
     
-    // If we have household serving info to add
+    // Only add household serving info for Case 1 (no input unit) or Case 3 (unknown units)
     if (conversion && conversion.householdServing) {
-      const householdText = conversion.householdServing;
+      const { unknownUnits } = require("../utils/helpers");
       
-      // For Edamam, use the originalServingSize (totalWeight), for USDA use conversion values
-      let servingSize;
-      if (dbSource === 'edamam') {
-        servingSize = originalServingSize; // This is totalWeight from Edamam
-      } else {
-        servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
-      }
-      
-      // For Case 1 (no quantity specified), use "default" as the unit
-      let servingUnit;
+      // Case 1: No input unit (e.g., "5 milk") - add as "default"
       if (!parsedInput?.quantity) {
-        servingUnit = "default";
-      } else {
-        // For household units, use the parsed quantity
-        servingUnit = parsedInput.quantity;
-      }
-      
-      // Check if this household serving already exists
-      const existingServing = existingRecord.householdServings.find(serving => 
-        serving.servingUnit === servingUnit && serving.servingSize === servingSize
-      );
-      
-      if (!existingServing) {
-        // Add new household serving
-        existingRecord.householdServings.push({
-          servingSize: servingSize,
-          servingUnit: servingUnit,
-        });
+        // For Edamam, use the originalServingSize (totalWeight), for USDA use conversion values
+        let servingSize;
+        if (dbSource === 'edamam') {
+          servingSize = originalServingSize; // This is totalWeight from Edamam
+        } else {
+          // For USDA, we need to calculate the weight per unit
+          if (conversion.matchedServingSize && conversion.servingQuantity) {
+            servingSize = conversion.matchedServingSize / conversion.servingQuantity;
+          } else {
+            servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
+          }
+        }
         
-        await existingRecord.save();
-        console.log("Added new household serving to existing record");
-      } else {
-        console.log("Household serving already exists in record");
+        // Check if this household serving already exists
+        const existingServing = existingRecord.householdServings.find(serving => 
+          serving.servingUnit === "default" && serving.servingSize === servingSize
+        );
+        
+        if (!existingServing) {
+          // Add new household serving
+          existingRecord.householdServings.push({
+            servingSize: servingSize,
+            servingUnit: "default",
+          });
+          
+          await existingRecord.save();
+          console.log("Added new household serving to existing record");
+        } else {
+          console.log("Household serving already exists in record");
+        }
+      }
+      // Case 3: Unknown units (household units like "slice", "cup", etc.) - add the household unit
+      else if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
+        // For Edamam, use the originalServingSize (totalWeight), for USDA use conversion values
+        let servingSize;
+        if (dbSource === 'edamam') {
+          servingSize = originalServingSize; // This is totalWeight from Edamam
+        } else {
+          // For USDA, we need to calculate the weight per unit
+          if (conversion.matchedServingSize && conversion.servingQuantity) {
+            servingSize = conversion.matchedServingSize / conversion.servingQuantity;
+          } else {
+            servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
+          }
+        }
+        
+        // Check if this household serving already exists
+        const existingServing = existingRecord.householdServings.find(serving => 
+          serving.servingUnit === parsedInput.quantity && serving.servingSize === servingSize
+        );
+        
+        if (!existingServing) {
+          // Add new household serving
+          existingRecord.householdServings.push({
+            servingSize: servingSize,
+            servingUnit: parsedInput.quantity,
+          });
+          
+          await existingRecord.save();
+          console.log("Added new household serving to existing record");
+        } else {
+          console.log("Household serving already exists in record");
+        }
+      }
+      // Case 2: Known units (ml, g, kg, etc.) - don't add household servings
+      else if (parsedInput?.quantity) {
+        console.log("Skipping household serving for known unit:", parsedInput.quantity);
       }
     }
     
@@ -86,7 +123,7 @@ async function saveNutritionData(storageName, nutritionDataToSave, conversion, d
   }
 }
 
-function createStorageName(cleanSearchTerm, conversion) {
+function createStorageName(cleanSearchTerm) {
   // Always use just the clean search term for storage name
   // Household servings will be stored in the householdServings array
   return cleanSearchTerm;
@@ -105,31 +142,54 @@ function createNutritionDocument(storageName, mappedNutrition, conversion, sourc
   // Prepare household servings array
   let householdServings = [];
   
+  // Only add household servings for Case 1 (no input unit) or Case 3 (unknown units)
   if (conversion && conversion.householdServing) {
-    // Extract serving size and unit from householdServing text
-    const householdText = conversion.householdServing;
+    const { unknownUnits } = require("../utils/helpers");
     
-    // For Edamam, use the originalServingSize (totalWeight), for USDA use conversion values
-    let servingSize;
-    if (source === 'edamam') {
-      servingSize = originalServingSize; // This is totalWeight from Edamam
-    } else {
-      servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
-    }
-    
-    // For Case 1 (no quantity specified), use "default" as the unit
-    let servingUnit;
+    // Case 1: No input unit (e.g., "5 milk") - always add as "default"
     if (!parsedInput?.quantity) {
-      servingUnit = "default";
-    } else {
-      // For household units, use the parsed quantity
-      servingUnit = parsedInput.quantity;
+      // Extract serving size and unit from householdServing text
+      let servingSize;
+      if (source === 'edamam') {
+        servingSize = originalServingSize; // This is totalWeight from Edamam
+      } else {
+        // For USDA, we need to calculate the weight per unit
+        if (conversion.matchedServingSize && conversion.servingQuantity) {
+          servingSize = conversion.matchedServingSize / conversion.servingQuantity;
+        } else {
+          servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
+        }
+      }
+      
+      householdServings.push({
+        servingSize: servingSize,
+        servingUnit: "default",
+      });
     }
-    
-    householdServings.push({
-      servingSize: servingSize,
-      servingUnit: servingUnit,
-    });
+    // Case 3: Unknown units (household units like "slice", "cup", etc.)
+    else if (parsedInput?.quantity && unknownUnits.includes(parsedInput.quantity)) {
+      // Extract serving size and unit from householdServing text
+      let servingSize;
+      if (source === 'edamam') {
+        servingSize = originalServingSize; // This is totalWeight from Edamam
+      } else {
+        // For USDA, we need to calculate the weight per unit
+        if (conversion.matchedServingSize && conversion.servingQuantity) {
+          servingSize = conversion.matchedServingSize / conversion.servingQuantity;
+        } else {
+          servingSize = conversion.matchedServingSize || conversion.servingQuantity || 1;
+        }
+      }
+      
+      householdServings.push({
+        servingSize: servingSize,
+        servingUnit: parsedInput.quantity,
+      });
+    }
+    // Case 2: Known units (ml, g, kg, etc.) - don't add household servings
+    else if (parsedInput?.quantity) {
+      console.log("Skipping household serving for known unit:", parsedInput.quantity);
+    }
   }
   
   return new Nutrition({
@@ -196,29 +256,55 @@ const getNutrition = async (req, res) => {
       // Use the nutrients directly from database (already in standardized format)
       const nutrients = atlasSearchResults[0].nutrients;
 
-             // Nutrition data is stored per 1g, so we need to apply proper conversion
+      // Nutrition data is stored per 1g, so we need to apply proper conversion
       
-             // Check if we have household servings and should use them
-       const hasHouseholdServings = atlasSearchResults[0].householdServings && 
-         Array.isArray(atlasSearchResults[0].householdServings) && 
-         atlasSearchResults[0].householdServings.length > 0;
-       
-       let conversion = null;
-       
-       if (hasHouseholdServings) {
-         // Try to use household serving conversion
-         conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
-         
-         if (!conversion) {
-           // No matching household serving found, need to go to APIs
-           console.log("No matching household serving found, falling back to APIs");
-           throw new Error("No matching household serving found");
-         }
-       } else {
-         // No household servings available, need to go to APIs
-         console.log("No household servings available, falling back to APIs");
-         throw new Error("No household servings available");
-       }
+      // Check if we have household servings and should use them
+      const hasHouseholdServings = atlasSearchResults[0].householdServings && 
+        Array.isArray(atlasSearchResults[0].householdServings) && 
+        atlasSearchResults[0].householdServings.length > 0;
+      
+      let conversion = null;
+      
+      // Check if this is a known unit (Case 2) or unknown unit (Case 3)
+      const isKnownUnit = parsedInput?.quantity && knownUnits.includes(parsedInput.quantity);
+      
+      if (hasHouseholdServings) {
+        // Try to use household serving conversion (Case 1 or Case 3)
+        conversion = createHouseholdServingConversion(quantity, parsedInput, atlasSearchResults[0]);
+        
+        if (!conversion) {
+          // No matching household serving found, need to go to APIs
+          console.log("No matching household serving found, falling back to APIs");
+          throw new Error("No matching household serving found");
+        }
+      } else if (isKnownUnit) {
+        // Case 2: Known unit with no household servings - use direct conversion
+        console.log("Case 2: Known unit with no household servings, using direct conversion");
+        
+        // Use the base unit converter to handle known unit conversion
+        const { convertAtlasSearchToBaseUnit } = require("../utils/baseUnitConverter");
+        conversion = await convertAtlasSearchToBaseUnit(
+          quantity,
+          parsedInput.quantity,
+          atlasSearchResults[0].baseServingSize,
+          atlasSearchResults[0].baseServingUnit
+        );
+        
+        if (!conversion) {
+          // Fallback to simple multiplication
+          conversion = {
+            convertedQuantity: quantity,
+            convertedUnit: parsedInput.quantity,
+            householdServing: null,
+            matchedFood: null
+          };
+          console.log("Using simple multiplication as fallback");
+        }
+      } else {
+        // Case 3: Unknown unit but no household servings available, need to go to APIs
+        console.log("Case 3: Unknown unit with no household servings, falling back to APIs");
+        throw new Error("No household servings available for unknown unit");
+      }
 
       // Since nutrition data is now normalized to per 1g/1ml, multiply by the converted quantity
       const convertedQuantity = conversion ? conversion.convertedQuantity : quantity;
@@ -265,7 +351,7 @@ const getNutrition = async (req, res) => {
     console.log("Saving nutrition data to database");
     
     // Store the mapped nutrition data
-    const storageName = createStorageName(cleanSearchTerm, conversion);
+    const storageName = createStorageName(cleanSearchTerm);
     
          // Get original serving size from the API response based on the case
      let originalServingSize, originalServingUnit;
@@ -303,7 +389,7 @@ const getNutrition = async (req, res) => {
      // Use the source directly from search result
      const dbSource = searchResult.source;
      
-     const nutrition = await saveNutritionData(storageName, nutritionDataToSave, conversion, dbSource, originalServingSize, originalServingUnit, parsedInput);
+     await saveNutritionData(storageName, nutritionDataToSave, conversion, dbSource, originalServingSize, originalServingUnit, parsedInput);
 
     console.log("Nutrition data saved with name:", storageName);
 
@@ -387,57 +473,92 @@ const getBulkNutrition = async (req, res) => {
         const quantityNum = parseFloat(quantity) || 1;
         const foodName = unit ? `${quantityNum} ${unit} ${name}` : `${quantityNum} ${name}`;
 
+        // Use improved normalization for database search
+        const cleanSearchTerm = normalizeFoodName(name);
+        console.log("Searching for:", cleanSearchTerm);
+
         // Try database first
-        const databaseResult = await searchDatabase(name, { number: quantityNum, quantity: unit, food: name });
+        const databaseResult = await searchDatabase(cleanSearchTerm, { number: quantityNum, quantity: unit, food: name });
         console.log("Database result:", databaseResult);
                  if (databaseResult && databaseResult.success && databaseResult.selectedResult && databaseResult.selectedResult.nutrients) {
-           // Check if we have household servings and should use them
-           const hasHouseholdServings = databaseResult.selectedResult.householdServings && 
-             Array.isArray(databaseResult.selectedResult.householdServings) && 
-             databaseResult.selectedResult.householdServings.length > 0;
-           
-           let conversion = null;
-           let multiplier = quantityNum;
-           
-           if (hasHouseholdServings) {
-             // Try to use household serving conversion
-             const { createHouseholdServingConversion } = require("../services/databaseSearchService");
-             conversion = createHouseholdServingConversion(quantityNum, { number: quantityNum, quantity: unit, food: name }, databaseResult.selectedResult);
-             
-             console.log("Household serving conversion:", conversion);
-             console.log("Database result household servings:", databaseResult.selectedResult.householdServings);
-             console.log("Parsed input for conversion:", { number: quantityNum, quantity: unit, food: name });
-             
-             if (conversion) {
-               multiplier = conversion.multiplier;
-             } else {
-               // No matching household serving found, need to go to APIs
-               console.log("No matching household serving found, falling back to APIs");
-               throw new Error("No matching household serving found");
-             }
-           } else {
-             // No household servings available, need to go to APIs
-             console.log("No household servings available, falling back to APIs");
-             throw new Error("No household servings available");
-           }
+          // Check if we have household servings and should use them
+          const hasHouseholdServings = databaseResult.selectedResult.householdServings && 
+            Array.isArray(databaseResult.selectedResult.householdServings) && 
+            databaseResult.selectedResult.householdServings.length > 0;
           
-          console.log("Using multiplier:", multiplier, "for food:", foodName);
+          let conversion = null;
+          let multiplier = quantityNum;
           
-          const calculatedNutrients = {};
-          Object.keys(databaseResult.selectedResult.nutrients).forEach(nutrient => {
-            const originalValue = databaseResult.selectedResult.nutrients[nutrient];
-            const calculatedValue = originalValue * multiplier;
-            calculatedNutrients[nutrient] = calculatedValue;
-            console.log(`${nutrient}: ${originalValue} * ${multiplier} = ${calculatedValue}`);
-          });
+          // Check if this is a known unit (Case 2) or unknown unit (Case 3)
+          const { knownUnits } = require("../utils/helpers");
+          const isKnownUnit = unit && knownUnits.includes(unit);
+          
+          if (hasHouseholdServings) {
+            // Try to use household serving conversion (Case 1 or Case 3)
+            const { createHouseholdServingConversion } = require("../services/databaseSearchService");
+            conversion = await createHouseholdServingConversion(quantityNum, { number: quantityNum, quantity: unit, food: name }, databaseResult.selectedResult);
+            
+            console.log("Household serving conversion:", conversion);
+            console.log("Database result household servings:", databaseResult.selectedResult.householdServings);
+            console.log("Parsed input for conversion:", { number: quantityNum, quantity: unit, food: name });
+            
+            if (conversion) {
+              multiplier = conversion.multiplier;
+            } else {
+              // No matching household serving found, need to go to APIs
+              console.log("No matching household serving found, falling back to APIs");
+              // Don't throw error - let it fall through to API search
+              // Remove the throw statement to allow fallback to APIs
+            }
+          } else if (isKnownUnit) {
+            // Case 2: Known unit with no household servings - use direct conversion
+            console.log("Case 2: Known unit with no household servings, using direct conversion");
+            
+            // Use the base unit converter to handle known unit conversion
+            const { convertAtlasSearchToBaseUnit } = require("../utils/baseUnitConverter");
+            conversion = await convertAtlasSearchToBaseUnit(
+              quantityNum,
+              unit,
+              databaseResult.selectedResult.baseServingSize,
+              databaseResult.selectedResult.baseServingUnit
+            );
+            
+            if (conversion) {
+              multiplier = conversion.convertedQuantity;
+              console.log("Direct conversion result:", conversion);
+            } else {
+              // Fallback to simple multiplication
+              multiplier = quantityNum;
+              console.log("Using simple multiplication as fallback");
+            }
+          } else {
+            // Case 3: Unknown unit but no household servings available, need to go to APIs
+            console.log("Case 3: Unknown unit with no household servings, falling back to APIs");
+            throw new Error("No household servings available for unknown unit");
+          }
+         
+         // Only proceed with database calculation if we have a valid conversion
+         if (conversion && multiplier !== undefined) {
+           console.log("Using multiplier:", multiplier, "for food:", foodName);
+           
+           const calculatedNutrients = {};
+           Object.keys(databaseResult.selectedResult.nutrients).forEach(nutrient => {
+             const originalValue = databaseResult.selectedResult.nutrients[nutrient];
+             const calculatedValue = originalValue * multiplier;
+             calculatedNutrients[nutrient] = calculatedValue;
+             console.log(`${nutrient}: ${originalValue} * ${multiplier} = ${calculatedValue}`);
+           });
 
-          results.push({
-            name: foodName,
-            ...calculatedNutrients,
-            source: "database"
-          });
-          continue;
-        }
+           results.push({
+             name: foodName,
+             ...calculatedNutrients,
+             source: "database"
+           });
+           continue;
+         } else {
+           console.log("No valid conversion found, falling back to APIs");
+         }
+       }
 
         // If not in database, try USDA API
         console.log("Bulk API - Trying USDA API for:", name, "with parsed input:", { number: quantityNum, quantity: unit, food: name });
@@ -461,8 +582,9 @@ const getBulkNutrition = async (req, res) => {
             console.log(`${nutrient}: ${originalValue} * ${multiplier} = ${calculatedValue}`);
           });
 
-          // Save to database
-          await saveNutritionData(name, mappedNutrition, usdaResult.conversion, 'usda', usdaResult.nutritionData.response.servingSize, usdaResult.nutritionData.response.servingSizeUnit, { number: quantityNum, quantity: unit, food: name });
+          // Save to database - convert unit to singular form for proper household serving storage
+          const singularUnit = unit ? pluralize.singular(unit) : null;
+          await saveNutritionData(name, mappedNutrition, usdaResult.conversion, 'usda', usdaResult.nutritionData.response.servingSize, usdaResult.nutritionData.response.servingSizeUnit, { number: quantityNum, quantity: singularUnit, food: name });
 
           results.push({
             name: foodName,
@@ -483,8 +605,9 @@ const getBulkNutrition = async (req, res) => {
             calculatedNutrition[nutrient] = mappedNutrition[nutrient] * edamamResult.conversion.multiplier;
           });
 
-          // Save to database
-          await saveNutritionData(name, mappedNutrition, edamamResult.conversion, 'edamam', edamamResult.nutritionData.response.totalWeight, 'g', { number: quantityNum, quantity: unit, food: name });
+          // Save to database - convert unit to singular form for proper household serving storage
+          const singularUnit = unit ? pluralize.singular(unit) : null;
+          await saveNutritionData(name, mappedNutrition, edamamResult.conversion, 'edamam', edamamResult.nutritionData.response.totalWeight, 'g', { number: quantityNum, quantity: singularUnit, food: name });
 
           results.push({
             name: foodName,

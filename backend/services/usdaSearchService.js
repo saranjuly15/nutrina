@@ -82,9 +82,12 @@ function handleCase1NoUnit(quantity, usdaResult, mappedNutrition) {
   // Use the base serving size as the household serving size
   const householdServing = `${baseServingSize} ${baseServingUnit}`;
   
+  // Since nutrition data is normalized to per 1g/1ml, the multiplier should be the total grams
+  const totalWeight = baseServingSize * quantity;
+  
   const conversion = {
-    multiplier: quantity, // Simple quantity multiplier
-    convertedQuantity: baseServingSize * quantity,
+    multiplier: totalWeight, // Total weight multiplier (e.g., 112 for 4 bread × 28g)
+    convertedQuantity: totalWeight,
     convertedUnit: baseServingUnit,
     matchedFood: null,
     householdServing: householdServing,
@@ -170,13 +173,12 @@ async function handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mapped
     
     if (matchingFoods.length > 0) {
       // Take the first matching food
+      console.log("Matching foods:", matchingFoods);
       matchedFood = matchingFoods[0];
       householdServingFullText = matchedFood.householdServingFullText;
       matchedServingSize = matchedFood.servingSize || 1;
-      
-      console.log("Found matched food with householdServingFullText:", matchedFood.description);
-      console.log("householdServingFullText:", householdServingFullText);
-      console.log("Matched food serving size:", matchedServingSize, matchedFood.servingSizeUnit);
+
+      console.log("Matched food:", matchedFood);
     } else {
       console.log("No food found with matching householdServingFullText, falling back to Edamam API");
       // Return null to trigger fallback to Edamam API
@@ -188,17 +190,29 @@ async function handleCase3UnknownUnits(quantity, parsedInput, usdaResult, mapped
     return null;
   }
   
-  // Calculate the multiplier based on the matched food's serving size
-  const convertedQuantity = matchedServingSize * quantity;
+  // Use the existing household unit conversion logic from baseUnitConverter
+  const { extractServingQuantity } = require("../utils/baseUnitConverter");
+  
+  // Extract the serving quantity from householdServingFullText
+  const servingQuantity = extractServingQuantity(householdServingFullText, parsedInput.quantity);
+  
+  // Calculate the weight per unit: if USDA says "2 slices = 152g", then 1 slice = 76g
+  const weightPerUnit = matchedServingSize / servingQuantity;
+  
+  // Calculate the total weight for the requested quantity
+  const convertedQuantity = weightPerUnit * quantity;
+  
+  // Since nutrition data is normalized to per 1g, the multiplier should be the total grams
+  const multiplier = convertedQuantity;
   const convertedUnit = matchedFood ? matchedFood.servingSizeUnit : (firstResponse.servingSizeUnit || "g");
   
   const conversion = {
-    multiplier: convertedQuantity, // Use convertedQuantity as multiplier (e.g., 220 for 1 bowl)
+    multiplier: multiplier, // Use the proper multiplier (e.g., 0.5 for 1 slice when USDA says 2 slices)
     convertedQuantity: convertedQuantity,
     convertedUnit: convertedUnit,
     matchedFood: matchedFood ? matchedFood.description : null,
     householdServing: householdServingFullText,
-    servingQuantity: quantity,
+    servingQuantity: servingQuantity,
     fromUSDA: true,
     matchedServingSize: matchedServingSize
   };
