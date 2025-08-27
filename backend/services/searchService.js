@@ -26,20 +26,8 @@ async function performCompleteSearch(quantity, parsedInput, searchFoodName, food
     };
   }
   
-  // Step 2: Search USDA API (if database search failed)
-  console.log("Database search failed, trying USDA API");
-  const usdaResult = await searchUSDA(quantity, parsedInput, searchFoodName, foodName);
-  
-  if (usdaResult.success) {
-    console.log("USDA API search successful, returning result");
-    return {
-      ...usdaResult,
-      searchMethod: "usda"
-    };
-  }
-  
-  // Step 3: Search Edamam API (if USDA search failed)
-  console.log("USDA API search failed, trying Edamam API");
+  // Step 2: Search Edamam API (if database search failed)
+  console.log("Database search failed, trying Edamam API");
   const edamamResult = await searchEdamam(quantity, parsedInput, searchFoodName, foodName);
   
   if (edamamResult.success) {
@@ -50,12 +38,24 @@ async function performCompleteSearch(quantity, parsedInput, searchFoodName, food
     };
   }
   
+  // Step 3: Search USDA API (if Edamam search failed or returned 400 errors)
+  console.log("Edamam API search failed, trying USDA API");
+  const usdaResult = await searchUSDA(quantity, parsedInput, searchFoodName, foodName);
+  
+  if (usdaResult.success) {
+    console.log("USDA API search successful, returning result");
+    return {
+      ...usdaResult,
+      searchMethod: "usda"
+    };
+  }
+  
   // Step 4: All searches failed
   console.log("=== ALL SEARCHES FAILED ===");
   return {
     success: false,
     source: "none",
-    message: "No nutrition data found from database, USDA, or Edamam APIs",
+    message: "No nutrition data found from database, Edamam, or USDA APIs",
     error: "All search methods failed"
   };
 }

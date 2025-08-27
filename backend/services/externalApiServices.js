@@ -56,7 +56,7 @@ const getEdamamNutritionData = async (foodName) => {
     
     //console.log("Edamam API response:", JSON.stringify(edamam_response.data, null, 2));
 
-    if (edamam_response.data.calories !== 0) {
+    if (edamam_response.status !== false) {
       return { 
         response: edamam_response.data, 
         edamam: true,
@@ -84,16 +84,7 @@ const getNutritionData = async (foodName, unit) => {
   console.log("foodName:", foodName);
   console.log("unit:", unit);
   
-  // Try USDA API first
-  const usdaResult = await getUSDANutritionData(foodName, unit);
-  
-  if (usdaResult.success) {
-    console.log("USDA API successful, returning data");
-    return usdaResult;
-  }
-  
-  // If USDA fails, try Edamam API
-  console.log("USDA API failed, trying Edamam API");
+  // Try Edamam API first
   const edamamResult = await getEdamamNutritionData(foodName);
   
   if (edamamResult.success) {
@@ -101,9 +92,18 @@ const getNutritionData = async (foodName, unit) => {
     return edamamResult;
   }
   
+  // If Edamam fails, try USDA API
+  console.log("Edamam API failed, trying USDA API");
+  const usdaResult = await getUSDANutritionData(foodName, unit);
+  
+  if (usdaResult.success) {
+    console.log("USDA API successful, returning data");
+    return usdaResult;
+  }
+  
   // If both APIs fail, throw error
   throw new Error(
-    "No nutrition data found from either USDA or Edamam APIs"
+    "No nutrition data found from either Edamam or USDA APIs"
   );
 };
 

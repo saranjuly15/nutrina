@@ -9,14 +9,14 @@
         :class="{ active: currentView === 'single' }"
         @click="currentView = 'single'"
       >
-        🔍 Single Food Search
+        Single Food Search
       </button>
       <button
         class="nav-btn"
         :class="{ active: currentView === 'bulk' }"
         @click="currentView = 'bulk'"
       >
-        📦 Test Bulk Food API
+        Bulk Food Search
       </button>
     </div>
 
@@ -322,14 +322,14 @@
       <div class="response-section">
         <div class="response-header">
           <h3>Response:</h3>
-          <button class="clear-btn" @click="clearBulkResponse">Clear</button>
+          <!-- <button class="clear-btn" @click="clearBulkResponse">Clear</button> -->
         </div>
         <div class="response-content" v-if="bulkResponse">
           <pre>{{ JSON.stringify(bulkResponse, null, 2) }}</pre>
           <div v-if="bulkResponse.status === 'success'" class="success-message">
-            ✅ Bulk Search successful!
+            Success!
           </div>
-          <div v-else class="error-message">❌ Bulk Search failed!</div>
+          <div v-else class="error-message">Error!</div>
         </div>
         <div v-else class="no-response">No response yet...</div>
       </div>
@@ -468,9 +468,9 @@ const testBulkAPI = async () => {
   }
 };
 
-const clearBulkResponse = () => {
-  bulkResponse.value = null;
-};
+// const clearBulkResponse = () => {
+//   bulkResponse.value = null;
+// };
 
 // Initialize bulk test when switching to it
 watch(currentView, (newValue) => {

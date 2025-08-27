@@ -228,7 +228,7 @@ const getNutrition = async (req, res) => {
 
 
     // ============================================================================
-    // PERFORM COMPLETE SEARCH (Database → USDA → Edamam)
+    // PERFORM COMPLETE SEARCH (Database → Edamam → USDA)
     // ============================================================================
     const searchResult = await performCompleteSearch(quantity, parsedInput, searchFoodName, foodName);
     
@@ -560,8 +560,32 @@ const getBulkNutrition = async (req, res) => {
          }
        }
 
-        // If not in database, try USDA API
-        console.log("Bulk API - Trying USDA API for:", name, "with parsed input:", { number: quantityNum, quantity: unit, food: name });
+        // If not in database, try Edamam API first
+        console.log("Bulk API - Trying Edamam API for:", name, "with parsed input:", { number: quantityNum, quantity: unit, food: name });
+        const edamamResult = await searchEdamam(quantityNum, { number: quantityNum, quantity: unit, food: name }, name, `${quantityNum} ${unit ? unit + ' ' : ''}${name}`);
+        
+        if (edamamResult.success) {
+          const mappedNutrition = extractEdamamNutrition(edamamResult.nutritionData.response);
+          const calculatedNutrition = {};
+          
+          Object.keys(mappedNutrition).forEach(nutrient => {
+            calculatedNutrition[nutrient] = mappedNutrition[nutrient] * edamamResult.conversion.multiplier;
+          });
+
+          // Save to database - convert unit to singular form for proper household serving storage
+          const singularUnit = unit ? pluralize.singular(unit) : null;
+          await saveNutritionData(name, mappedNutrition, edamamResult.conversion, 'edamam', edamamResult.nutritionData.response.totalWeight, 'g', { number: quantityNum, quantity: singularUnit, food: name });
+
+          results.push({
+            name: foodName,
+            ...calculatedNutrition,
+            source: "edamam"
+          });
+          continue;
+        }
+
+        // If Edamam fails or returns 400 errors, try USDA API
+        console.log("Bulk API - Edamam failed, trying USDA API for:", name, "with parsed input:", { number: quantityNum, quantity: unit, food: name });
         const usdaResult = await searchUSDA(quantityNum, { number: quantityNum, quantity: unit, food: name }, name, `${quantityNum} ${unit ? unit + ' ' : ''}${name}`);
         
         if (usdaResult.success) {
@@ -590,29 +614,6 @@ const getBulkNutrition = async (req, res) => {
             name: foodName,
             ...calculatedNutrition,
             source: "usda"
-          });
-          continue;
-        }
-
-        // If USDA fails, try Edamam API
-        const edamamResult = await searchEdamam(quantityNum, { number: quantityNum, quantity: unit, food: name }, name, `${quantityNum} ${unit ? unit + ' ' : ''}${name}`);
-        
-        if (edamamResult.success) {
-          const mappedNutrition = extractEdamamNutrition(edamamResult.nutritionData.response);
-          const calculatedNutrition = {};
-          
-          Object.keys(mappedNutrition).forEach(nutrient => {
-            calculatedNutrition[nutrient] = mappedNutrition[nutrient] * edamamResult.conversion.multiplier;
-          });
-
-          // Save to database - convert unit to singular form for proper household serving storage
-          const singularUnit = unit ? pluralize.singular(unit) : null;
-          await saveNutritionData(name, mappedNutrition, edamamResult.conversion, 'edamam', edamamResult.nutritionData.response.totalWeight, 'g', { number: quantityNum, quantity: singularUnit, food: name });
-
-          results.push({
-            name: foodName,
-            ...calculatedNutrition,
-            source: "edamam"
           });
           continue;
         }
