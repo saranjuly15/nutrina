@@ -5,11 +5,12 @@ const router = express.Router();
 const {
   getNutrition,
   getAllNutrition,
-  testAtlasSearch,
+  getBulkNutrition,
 } = require("../controllers/nutritionController");
 
 router.get("/nutrition", getNutrition);
+router.post("/nutrition/bulk", getBulkNutrition);
 router.get("/nutrition/all", getAllNutrition);
-router.get("/nutrition/test-search", testAtlasSearch);
+
 
 module.exports = router;
