@@ -313,7 +313,7 @@
             ➕ Add Food Item
           </button>
           <button class="test-btn" @click="testBulkAPI" :disabled="bulkLoading">
-            {{ bulkLoading ? "Searching..." : " Search" }}
+            {{ bulkLoading ? "Submitting..." : " Submit" }}
           </button>
         </div>
       </div>
@@ -322,7 +322,7 @@
       <div class="response-section">
         <div class="response-header">
           <h3>Response:</h3>
-          <!-- <button class="clear-btn" @click="clearBulkResponse">Clear</button> -->
+          <button class="clear-btn" @click="clearBulkResponse">Clear</button>
         </div>
         <div class="response-content" v-if="bulkResponse">
           <pre>{{ JSON.stringify(bulkResponse, null, 2) }}</pre>
@@ -468,9 +468,9 @@ const testBulkAPI = async () => {
   }
 };
 
-// const clearBulkResponse = () => {
-//   bulkResponse.value = null;
-// };
+const clearBulkResponse = () => {
+  bulkResponse.value = null;
+};
 
 // Initialize bulk test when switching to it
 watch(currentView, (newValue) => {
@@ -1108,15 +1108,18 @@ button:disabled {
   border: 1px solid #e1e5e9;
   border-radius: 8px;
   padding: 20px;
-  max-height: 400px;
+  max-height: 600px;
   overflow-y: auto;
+  text-align: left;
 }
 
 .response-content pre {
   font-family: "Courier New", monospace;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.5;
   white-space: pre-wrap;
   margin: 0;
+  text-align: left;
 }
 
 .success-message {

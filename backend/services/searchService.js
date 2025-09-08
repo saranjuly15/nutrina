@@ -1,6 +1,7 @@
 const { searchDatabase, createHouseholdServingConversion } = require("./databaseSearchService");
 const { searchUSDA } = require("./usdaSearchService");
 const { searchEdamam } = require("./edamamSearchService");
+const { SOURCE_URLS } = require("./externalApiServices");
 
 // ============================================================================
 // MAIN SEARCH ORCHESTRATOR
@@ -26,28 +27,31 @@ async function performCompleteSearch(quantity, parsedInput, searchFoodName, food
     };
   }
   
-  // Step 2: Search Edamam API (if database search failed)
-  console.log("Database search failed, trying Edamam API");
-  const edamamResult = await searchEdamam(quantity, parsedInput, searchFoodName, foodName);
+  // Step 2: Search APIs in the order defined by SOURCE_URLS (if database search failed)
+  console.log("Database search failed, trying APIs in order:", SOURCE_URLS.map(s => s.Name));
   
-  if (edamamResult.success) {
-    console.log("Edamam API search successful, returning result");
-    return {
-      ...edamamResult,
-      searchMethod: "edamam"
-    };
-  }
-  
-  // Step 3: Search USDA API (if Edamam search failed or returned 400 errors)
-  console.log("Edamam API search failed, trying USDA API");
-  const usdaResult = await searchUSDA(quantity, parsedInput, searchFoodName, foodName);
-  
-  if (usdaResult.success) {
-    console.log("USDA API search successful, returning result");
-    return {
-      ...usdaResult,
-      searchMethod: "usda"
-    };
+  for (const source of SOURCE_URLS) {
+    console.log(`Trying ${source.Name} API`);
+    
+    let apiResult;
+    if (source.Name === "Edamam") {
+      apiResult = await searchEdamam(quantity, parsedInput, searchFoodName, foodName);
+    } else if (source.Name === "USDA") {
+      apiResult = await searchUSDA(quantity, parsedInput, searchFoodName, foodName);
+    } else {
+      console.log(`Unknown API source: ${source.Name}, skipping`);
+      continue;
+    }
+    
+    if (apiResult.success) {
+      console.log(`${source.Name} API search successful, returning result`);
+      return {
+        ...apiResult,
+        searchMethod: source.Name.toLowerCase()
+      };
+    } else {
+      console.log(`${source.Name} API search failed, trying next API`);
+    }
   }
   
   // Step 4: All searches failed
