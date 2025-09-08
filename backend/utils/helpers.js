@@ -14,6 +14,9 @@ const knownUnits = [
 ];
 
 const unknownUnits = [
+  "medium", 
+  "small",
+  "large",
   "bag",
   "bottle",
   "bowl",
